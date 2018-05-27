@@ -43,6 +43,10 @@ pff_dict = parallel_wavenet.feed_forward(inputs)
 pff_dict.update(inputs)
 loss_dict = parallel_wavenet.calculate_loss(pff_dict)
 
+# test differentiable
+st_vars = [var for var in tf.trainable_variables() if 'iaf' in var.name]
+grads = tf.gradients(loss_dict['loss'], st_vars)
+
 sess_config = tf.ConfigProto()
 sess_config.gpu_options.allow_growth = True
 sess = tf.Session(config=sess_config)
@@ -55,6 +59,7 @@ sess.run(tf.global_variables_initializer())
 # rl = pff_vals['rand_input']
 # print(np.allclose(x, rl * scale + mean))
 
-loss_vals = sess.run(
-    loss_dict, feed_dict={mel_ph: mel_val, wav_ph: wav_val})
+loss_vals, grad_vals = sess.run(
+    [loss_dict, grads], feed_dict={mel_ph: mel_val, wav_ph: wav_val})
 print(loss_vals)
+print(sum([np.sum(np.isnan(gv)) for gv in grad_vals]))
