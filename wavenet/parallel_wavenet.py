@@ -46,7 +46,7 @@ class ParallelWavenet(object):
         rl = tf.log(ru) - tf.log(1. - ru)
         return rl
 
-    def _create_iaf(self, inputs, iaf_idx):
+    def _create_iaf(self, inputs, iaf_idx, use_log_scale):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
         filter_length = self.hparams.filter_length
@@ -100,14 +100,19 @@ class ParallelWavenet(object):
         l = tf.nn.relu(l)
         out = masked.conv1d(l, num_filters=out_width, filter_length=1,
                             name='{}/out2'.format(iaf_name))
-        mean, scale = tf.split(out, num_or_size_splits=2, axis=2)
-        scale = tf.clip_by_value(scale, tf.exp(-7.0), tf.exp(7.0))
+        mean, scale_params = tf.split(out, num_or_size_splits=2, axis=2)
+        if use_log_scale:
+            scale_params = tf.clip_by_value(scale_params, -9.0, 7.0)
+            scale = tf.exp(scale_params)
+        else:
+            scale_params = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
+            scale = scale_params
         new_x = x * scale + mean
         return {'x': new_x,
                 'mean': mean,
-                'scale': scale}
+                'scale_params': scale_params}
 
-    def feed_forward(self, inputs):
+    def feed_forward(self, inputs, use_log_scale=True):
         num_stages = self.hparams.num_stages
         num_iafs = len(self.hparams.num_iaf_layers)
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
@@ -122,16 +127,32 @@ class ParallelWavenet(object):
         x = self._logistic_0_1(batch_size, length)
 
         iaf_x = tf.expand_dims(x, axis=2)
-        mean_tot, scale_tot = 0., 1.
+        mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
         for iaf_idx in range(num_iafs):
-            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx)
+            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx, use_log_scale)
             iaf_x = iaf_dict['x']
-            mean_tot = iaf_dict['mean'] + mean_tot * iaf_dict['scale']
-            scale_tot *= iaf_dict['scale']
-        scale_tot = tf.clip_by_value(scale_tot, tf.exp(-7.0), tf.exp(7.0))
-        return {'x': tf.squeeze(iaf_x, axis=2),
-                'mean_tot': tf.squeeze(mean_tot, axis=2),
-                'scale_tot': tf.squeeze(scale_tot, axis=2),
+
+            if use_log_scale:
+                log_scale = iaf_dict['scale_params']
+                scale = tf.exp(log_scale)
+            else:
+                scale = iaf_dict['scale_params']
+                log_scale = tf.log(scale)
+
+            mean_tot = iaf_dict['mean'] + mean_tot * scale
+            scale_tot *= scale
+            log_scale_tot += log_scale
+
+        mean_tot = tf.squeeze(mean_tot, axis=2)
+        scale_tot = tf.squeeze(tf.minimum(scale_tot, tf.exp(7.0)), axis=2)
+        log_scale_tot = tf.squeeze(tf.minimum(log_scale_tot, 7.0), axis=2)
+        new_x = tf.squeeze(iaf_x, axis=2)
+        # new_x = x * scale_tot + mean_tot
+
+        return {'x': new_x,
+                'mean_tot': mean_tot,
+                'scale_tot': scale_tot,
+                'log_scale_tot': log_scale_tot,
                 'rand_input': x}
 
     @staticmethod
@@ -157,6 +178,7 @@ class ParallelWavenet(object):
         x = ff_dict['x']
         mean = ff_dict['mean_tot']
         scale = ff_dict['scale_tot']
+        log_scale = ff_dict['log_scale_tot']
 
         batch_size, length = x.get_shape().as_list()
 
@@ -186,7 +208,6 @@ class ParallelWavenet(object):
             tf.reshape(log_te_probs, [batch_size, num_samples, length]),
             axis=1)
 
-        log_scale = tf.log(scale)
         H_Ps = tf.reduce_mean(log_scale) + 2
         H_Ps_Pt = tf.reduce_mean(H_Ps_Pt_bl)
         kl_loss = H_Ps_Pt - H_Ps

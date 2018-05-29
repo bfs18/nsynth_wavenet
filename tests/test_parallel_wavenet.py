@@ -10,7 +10,7 @@ from wavenet.parallel_wavenet import ParallelWavenet
 from wavenet.wavenet import Wavenet
 from auxilaries import mel_extractor
 
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+# os.environ['CUDA_VISIBLE_DEVICES'] = ''
 with open('../config_jsons/wavenet_mol.json', 'rt') as F:
     te_configs = json.load(F)
 te_hparams = Namespace(**te_configs)
@@ -33,13 +33,13 @@ mel_val = np.zeros(mel_shape)
 for i in range(batch_size):
     mel_val[i] = mel_extractor.melspectrogram(wav_val[i])
 
-mel_ph = tf.placeholder(tf.float32, mel_shape)
-wav_ph = tf.placeholder(tf.float32, wav_shape)
+mel_ph = tf.placeholder(tf.float32, mel_shape, name='mel_ph')
+wav_ph = tf.placeholder(tf.float32, wav_shape, name='wav_ph')
 inputs = {'mel': mel_ph,
           'wav': wav_ph}
 
 tf.set_random_seed(12345)
-pff_dict = parallel_wavenet.feed_forward(inputs)
+pff_dict = parallel_wavenet.feed_forward(inputs, use_log_scale=False)
 pff_dict.update(inputs)
 loss_dict = parallel_wavenet.calculate_loss(pff_dict)
 
@@ -52,12 +52,15 @@ sess_config.gpu_options.allow_growth = True
 sess = tf.Session(config=sess_config)
 sess.run(tf.global_variables_initializer())
 
-# pff_vals = sess.run(pff_dict, feed_dict={mel_ph: mel_val})
-# x = pff_vals['x']
-# mean = pff_vals['mean_tot']
-# scale = pff_vals['scale_tot']
-# rl = pff_vals['rand_input']
-# print(np.allclose(x, rl * scale + mean))
+pff_vals = sess.run(pff_dict, feed_dict={mel_ph: mel_val, wav_ph: wav_val})
+x = pff_vals['x']
+mean = pff_vals['mean_tot']
+scale = pff_vals['scale_tot']
+log_scale = pff_vals['log_scale_tot']
+rl = pff_vals['rand_input']
+x_ = rl * scale + mean
+print(np.all(scale > 0.))
+print(np.allclose(x, x_))
 
 loss_vals, grad_vals = sess.run(
     [loss_dict, grads], feed_dict={mel_ph: mel_val, wav_ph: wav_val})
