@@ -102,15 +102,16 @@ class ParallelWavenet(object):
                             name='{}/out2'.format(iaf_name))
         mean, scale_params = tf.split(out, num_or_size_splits=2, axis=2)
         if use_log_scale:
-            scale_params = tf.clip_by_value(scale_params, -9.0, 7.0)
-            scale = tf.exp(scale_params)
+            log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
+            scale = tf.exp(log_scale)
         else:
-            scale_params = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
-            scale = scale_params
+            scale = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
+            log_scale = tf.log(scale)
         new_x = x * scale + mean
         return {'x': new_x,
                 'mean': mean,
-                'scale_params': scale_params}
+                'scale': scale,
+                'log_scale': log_scale}
 
     def feed_forward(self, inputs, use_log_scale=True):
         num_stages = self.hparams.num_stages
@@ -131,14 +132,8 @@ class ParallelWavenet(object):
         for iaf_idx in range(num_iafs):
             iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx, use_log_scale)
             iaf_x = iaf_dict['x']
-
-            if use_log_scale:
-                log_scale = iaf_dict['scale_params']
-                scale = tf.exp(log_scale)
-            else:
-                scale = iaf_dict['scale_params']
-                log_scale = tf.log(scale)
-
+            scale = iaf_dict['scale']
+            log_scale = iaf_dict['log_scale']
             mean_tot = iaf_dict['mean'] + mean_tot * scale
             scale_tot *= scale
             log_scale_tot += log_scale
