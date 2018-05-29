@@ -76,7 +76,7 @@ def train(args):
 
             tf.summary.scalar("learning_rate", lr)
             # build the model graph
-            ff_dict = pwn.feed_forward(inputs_dict, use_log_scale=False)
+            ff_dict = pwn.feed_forward(inputs_dict)
             ff_dict.update(inputs_dict)
             loss_dict = pwn.calculate_loss(ff_dict)
             loss = loss_dict['loss']

@@ -46,7 +46,7 @@ class ParallelWavenet(object):
         rl = tf.log(ru) - tf.log(1. - ru)
         return rl
 
-    def _create_iaf(self, inputs, iaf_idx, use_log_scale):
+    def _create_iaf(self, inputs, iaf_idx):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
         filter_length = self.hparams.filter_length
@@ -101,19 +101,17 @@ class ParallelWavenet(object):
         out = masked.conv1d(l, num_filters=out_width, filter_length=1,
                             name='{}/out2'.format(iaf_name))
         mean, scale_params = tf.split(out, num_or_size_splits=2, axis=2)
-        if use_log_scale:
-            log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
-            scale = tf.exp(log_scale)
-        else:
-            scale = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
-            log_scale = tf.log(scale)
+        # this will make the gradient more stable.
+        scale_params = tf.nn.softplus(scale_params)
+        scale = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
+        log_scale = tf.log(scale)
         new_x = x * scale + mean
         return {'x': new_x,
                 'mean': mean,
                 'scale': scale,
                 'log_scale': log_scale}
 
-    def feed_forward(self, inputs, use_log_scale=True):
+    def feed_forward(self, inputs):
         num_stages = self.hparams.num_stages
         num_iafs = len(self.hparams.num_iaf_layers)
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
@@ -130,7 +128,7 @@ class ParallelWavenet(object):
         iaf_x = tf.expand_dims(x, axis=2)
         mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
         for iaf_idx in range(num_iafs):
-            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx, use_log_scale)
+            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx)
             iaf_x = iaf_dict['x']
             scale = iaf_dict['scale']
             log_scale = iaf_dict['log_scale']
@@ -141,8 +139,8 @@ class ParallelWavenet(object):
         mean_tot = tf.squeeze(mean_tot, axis=2)
         scale_tot = tf.squeeze(tf.minimum(scale_tot, tf.exp(7.0)), axis=2)
         log_scale_tot = tf.squeeze(tf.minimum(log_scale_tot, 7.0), axis=2)
-        new_x = tf.squeeze(iaf_x, axis=2)
-        # new_x = x * scale_tot + mean_tot
+        # new_x = tf.squeeze(iaf_x, axis=2)
+        new_x = x * scale_tot + mean_tot
 
         return {'x': new_x,
                 'mean_tot': mean_tot,

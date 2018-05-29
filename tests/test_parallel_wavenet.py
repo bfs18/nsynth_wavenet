@@ -39,7 +39,7 @@ inputs = {'mel': mel_ph,
           'wav': wav_ph}
 
 tf.set_random_seed(12345)
-pff_dict = parallel_wavenet.feed_forward(inputs, use_log_scale=False)
+pff_dict = parallel_wavenet.feed_forward(inputs)
 pff_dict.update(inputs)
 loss_dict = parallel_wavenet.calculate_loss(pff_dict)
 
