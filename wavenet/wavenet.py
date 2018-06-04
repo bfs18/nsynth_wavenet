@@ -177,7 +177,12 @@ class Wavenet(object):
         c = masked.conv1d(mel_en, num_filters=skip_width, filter_length=1, name='mel_cond_out1')
         s = _condition(s, c)
         s = tf.nn.relu(s)
-        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2')
+        # when using mol loss, the model always predicts log_scale, the initializer makes
+        # the log_scale in a reasonable small range to speed up convergence.
+        final_kernel_init = (tf.truncated_normal_initializer(0.0, 0.01) if self.loss_type == 'mol'
+                             else tf.uniform_unit_scaling_initializer(1.0))
+        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2',
+                            kernel_initializer=final_kernel_init)
 
         return {'real_targets': real_targets,
                 'cate_targets': cate_targets,
@@ -250,9 +255,9 @@ class Fastgen(object):
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
         mel_en = tf.expand_dims(mel_en, 1)  # [batch_size, 1, deconv_width]
 
-        # Encode the source with 8-bit Mu-Law.
         x = inputs['wav']  # [batch_size, 1]
         if use_mu_law:
+            # Encode the source with 8-bit Mu-Law.
             x_quantized = utils.mu_law(x)
             x_scaled = tf.cast(x_quantized, tf.float32) / (quant_chann / 2)
         else:

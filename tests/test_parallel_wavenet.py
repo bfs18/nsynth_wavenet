@@ -10,7 +10,7 @@ from wavenet.parallel_wavenet import ParallelWavenet
 from wavenet.wavenet import Wavenet
 from auxilaries import mel_extractor
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 with open('../config_jsons/wavenet_mol.json', 'rt') as F:
     te_configs = json.load(F)
 te_hparams = Namespace(**te_configs)

@@ -5,6 +5,9 @@ from functools import partial
 from wavenet import wavenet, masked, loss_func
 from auxilaries import utils
 
+# log switch for debugging scale value range
+DETAIL_LOG = True
+
 
 class ParallelWavenet(object):
     def __init__(self, hparams, teacher=None, train_path=None):
@@ -54,6 +57,7 @@ class ParallelWavenet(object):
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
+        use_log_scale = getattr(self.hparams, 'use_log_scale', True)
 
         mel = inputs['mel']
         x = inputs['x']
@@ -98,14 +102,28 @@ class ParallelWavenet(object):
                           name='{}/mel_cond_out1'.format(iaf_name))
         l = wavenet._condition(l, c)
         l = tf.nn.relu(l)
+
+        # to keep the scale in a reasonable small range if use_log_scale=True.
+        final_kernel_init = (tf.truncated_normal_initializer(0., 0.01) if use_log_scale
+                             else tf.uniform_unit_scaling_initializer(1.0))
         out = masked.conv1d(l, num_filters=out_width, filter_length=1,
-                            name='{}/out2'.format(iaf_name))
+                            name='{}/out2'.format(iaf_name),
+                            kernel_initializer=final_kernel_init)
         mean, scale_params = tf.split(out, num_or_size_splits=2, axis=2)
-        # this will make the gradient more stable.
-        scale_params = tf.nn.softplus(scale_params)
-        scale = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
-        log_scale = tf.log(scale)
+        if use_log_scale:
+            log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
+            scale = tf.exp(log_scale)
+        else:
+            scale_params = tf.nn.softplus(scale_params)
+            scale = tf.clip_by_value(scale_params, tf.exp(-9.0), tf.exp(7.0))
+            log_scale = tf.log(scale)
         new_x = x * scale + mean
+
+        if DETAIL_LOG:
+            tf.summary.scalar('scale_{}'.format(iaf_idx), tf.reduce_mean(scale))
+            tf.summary.scalar('log_scale_{}'.format(iaf_idx), tf.reduce_mean(log_scale))
+            tf.summary.scalar('mean_{}'.format(iaf_idx), tf.reduce_mean(mean))
+
         return {'x': new_x,
                 'mean': mean,
                 'scale': scale,
@@ -141,6 +159,11 @@ class ParallelWavenet(object):
         log_scale_tot = tf.squeeze(tf.minimum(log_scale_tot, 7.0), axis=2)
         # new_x = tf.squeeze(iaf_x, axis=2)
         new_x = x * scale_tot + mean_tot
+
+        if DETAIL_LOG:
+            tf.summary.scalar('mean_tot', tf.reduce_mean(mean_tot))
+            tf.summary.scalar('scale_tot', tf.reduce_mean(scale_tot))
+            tf.summary.scalar('log_scale_tot', tf.reduce_mean(log_scale_tot))
 
         return {'x': new_x,
                 'mean_tot': mean_tot,

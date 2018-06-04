@@ -10,8 +10,6 @@ Librosa downsample result may be not in [-1, 1), so use tool/sox_downsample.py t
 * [OK] parallel wavenet  
 * [OK] gen for parallel wavenet
 
-Notice: predicting log_scale from iaf is not a good choice. Because scale = exp(log_scale)  may be too large when running the randomly initialized networks.
-This would incur numerical problems in the following  steps.
 
 It seems that using mu law make the training easier. So experiment it first.
 * tune wavenet 

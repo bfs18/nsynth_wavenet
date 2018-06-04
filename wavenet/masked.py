@@ -165,7 +165,7 @@ def trans_conv1d(x,
                  filter_length,
                  stride,
                  name,
-                 kernel_initializer=tf.uniform_unit_scaling_initializer(1.0),
+                 kernel_initializer=tf.uniform_unit_scaling_initializer(1.15),
                  biases_initializer=tf.constant_initializer(0.0)):
     batch_size, length, num_input_channels = x.get_shape().as_list()
     x_4d = tf.reshape(x, [batch_size, 1, length, num_input_channels])
