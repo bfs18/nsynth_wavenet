@@ -13,15 +13,8 @@ class ParallelWavenet(object):
     def __init__(self, hparams, teacher=None, train_path=None):
         self.hparams = hparams
         self.num_iters = hparams.num_iters
-        self.learning_rate_schedule = {
-            0: 2e-4,
-            90000: 4e-4 / 3,
-            120000: 6e-5,
-            150000: 4e-5,
-            180000: 2e-5,
-            210000: 6e-6,
-            240000: 2e-6,
-        }
+        self.learning_rate_schedule = dict(
+            getattr(hparams, 'lr_schedule', wavenet.DEFAULT_LR_SCHEDULE))
         self.train_path = train_path
         self.use_mu_law = self.hparams.use_mu_law
         if self.use_mu_law:
