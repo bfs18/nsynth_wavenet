@@ -41,7 +41,9 @@ def train(args):
         clone_batch_size = int(total_batch_size / num_clones)
 
         deploy_config = model_deploy.DeploymentConfig(
-            num_clones=num_clones, clone_on_cpu=clone_on_cpu)
+            num_clones=num_clones, clone_on_cpu=clone_on_cpu,
+            num_ps_tasks=0,
+            worker_job_name='localhost', ps_job_name='localhost')
 
         with tf.device(deploy_config.inputs_device()):
             inputs_dict = wn.get_batch(clone_batch_size)
@@ -54,11 +56,12 @@ def train(args):
 
         summaries.update(tf.get_collection(tf.GraphKeys.SUMMARIES, first_clone_scope))
 
-        global_step = tf.get_variable(
-            "global_step", [],
-            tf.int32,
-            initializer=tf.constant_initializer(0),
-            trainable=False)
+        with tf.device(deploy_config.variables_device()):
+            global_step = tf.get_variable(
+                "global_step", [],
+                tf.int32,
+                initializer=tf.constant_initializer(0),
+                trainable=False)
 
         with tf.device(deploy_config.optimizer_device()):
             lr = tf.constant(wn.learning_rate_schedule[0])
@@ -68,21 +71,19 @@ def train(args):
             summaries.add(tf.summary.scalar("learning_rate", lr))
 
             optimizer = tf.train.AdamOptimizer(lr, epsilon=1e-8)
+            ema = tf.train.ExponentialMovingAverage(decay=0.9999, num_updates=global_step)
 
-        loss, clone_grads_vars = model_deploy.optimize_clones(
-            clones, optimizer, var_list=tf.trainable_variables())
-        update_ops.append(
-            optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
+            loss, clone_grads_vars = model_deploy.optimize_clones(
+                clones, optimizer, var_list=tf.trainable_variables())
+            update_ops.append(
+                optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
+            update_ops.append(ema.apply(tf.trainable_variables()))
 
-        ema = tf.train.ExponentialMovingAverage(
-            decay=0.9999, num_updates=global_step)
-        update_ops.append(ema.apply(tf.trainable_variables()))
+            summaries.add(tf.summary.scalar("train_loss", loss))
 
-        summaries.add(tf.summary.scalar("train_loss", loss))
-
-        update_op = tf.group(*update_ops)
-        with tf.control_dependencies([update_op]):
-            train_tensor = tf.identity(loss, name='train_op')
+            update_op = tf.group(*update_ops)
+            with tf.control_dependencies([update_op]):
+                train_tensor = tf.identity(loss, name='train_op')
 
         session_config = tf.ConfigProto(allow_soft_placement=True)
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
@@ -94,6 +95,7 @@ def train(args):
             summary_op=summary_op,
             global_step=global_step,
             log_every_n_steps=100,
+            save_summaries_secs=600,
             save_interval_secs=3600,
             session_config=session_config,)
 

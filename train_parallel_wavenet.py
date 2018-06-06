@@ -68,7 +68,9 @@ def train(args):
         clone_batch_size = int(total_batch_size / num_clones)
 
         deploy_config = model_deploy.DeploymentConfig(
-            num_clones=num_clones, clone_on_cpu=clone_on_cpu)
+            num_clones=num_clones, clone_on_cpu=clone_on_cpu,
+            num_ps_tasks=0,
+            worker_job_name='localhost', ps_job_name='localhost')
 
         with tf.device(deploy_config.inputs_device()):
             inputs_dict = pwn.get_batch(clone_batch_size)
@@ -81,40 +83,38 @@ def train(args):
 
         summaries.update(tf.get_collection(tf.GraphKeys.SUMMARIES, first_clone_scope))
 
-        global_step = tf.get_variable(
-            "global_step", [],
-            tf.int32,
-            initializer=tf.constant_initializer(0),
-            trainable=False)
-
-        with tf.device(deploy_config.optimizer_device()):
-            lr = tf.constant(pwn.learning_rate_schedule[0])
-            for key, value in pwn.learning_rate_schedule.items():
-                lr = tf.cond(
-                    tf.less(global_step, key), lambda: lr, lambda: tf.constant(value))
-            tf.summary.scalar("learning_rate", lr)
-
-            optimizer = tf.train.AdamOptimizer(lr, epsilon=1e-8)
+        with tf.device(deploy_config.variables_device()):
+            global_step = tf.get_variable(
+                "global_step", [],
+                tf.int32,
+                initializer=tf.constant_initializer(0),
+                trainable=False)
 
         ###
         # variables to train
         ###
         st_vars = [var for var in tf.trainable_variables() if 'iaf' in var.name]
 
-        loss, clone_grads_vars = model_deploy.optimize_clones(
-            clones, optimizer, var_list=st_vars)
-        update_ops.append(
-            optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
+        with tf.device(deploy_config.optimizer_device()):
+            lr = tf.constant(pwn.learning_rate_schedule[0])
+            for key, value in pwn.learning_rate_schedule.items():
+                lr = tf.cond(
+                    tf.less(global_step, key), lambda: lr, lambda: tf.constant(value))
+            summaries.add(tf.summary.scalar("learning_rate", lr))
 
-        ema = tf.train.ExponentialMovingAverage(
-            decay=0.9999, num_updates=global_step)
-        update_ops.append(ema.apply(st_vars))
+            optimizer = tf.train.AdamOptimizer(lr, epsilon=1e-8)
+            ema = tf.train.ExponentialMovingAverage(decay=0.9999, num_updates=global_step)
+            loss, clone_grads_vars = model_deploy.optimize_clones(
+                clones, optimizer, var_list=st_vars)
+            update_ops.append(
+                optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
+            update_ops.append(ema.apply(st_vars))
 
-        summaries.add(tf.summary.scalar("train_loss", loss))
+            summaries.add(tf.summary.scalar("train_loss", loss))
 
-        update_op = tf.group(*update_ops)
-        with tf.control_dependencies([update_op]):
-            train_tensor = tf.identity(loss, name='train_op')
+            update_op = tf.group(*update_ops)
+            with tf.control_dependencies([update_op]):
+                train_tensor = tf.identity(loss, name='train_op')
 
         ###
         # restore teacher
@@ -131,9 +131,10 @@ def train(args):
             train_tensor,
             logdir=logdir,
             number_of_steps=pwn.num_iters,
-            summary_op= summary_op,
+            summary_op=summary_op,
             global_step=global_step,
             log_every_n_steps=100,
+            save_summaries_secs=600,
             save_interval_secs=3600,
             session_config=session_config,
             init_fn=restore_init_fn)
