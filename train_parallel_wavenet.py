@@ -125,6 +125,7 @@ def train(args):
         restore_init_fn = tf.contrib.framework.assign_from_checkpoint_fn(te_ckpt, te_vars)
 
         session_config = tf.ConfigProto(allow_soft_placement=True)
+        session_config.gpu_options.allow_growth = True
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
         slim.learning.train(

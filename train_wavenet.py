@@ -86,6 +86,7 @@ def train(args):
                 train_tensor = tf.identity(loss, name='train_op')
 
         session_config = tf.ConfigProto(allow_soft_placement=True)
+        session_config.gpu_options.allow_growth = True
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
         slim.learning.train(

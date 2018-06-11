@@ -96,13 +96,17 @@ class ParallelWavenet(object):
         l = wavenet._condition(l, c)
         l = tf.nn.relu(l)
 
-        # to keep the scale in a reasonable small range if use_log_scale=True.
-        final_kernel_init = (tf.truncated_normal_initializer(0., 0.01) if use_log_scale
-                             else tf.uniform_unit_scaling_initializer(1.0))
-        out = masked.conv1d(l, num_filters=out_width, filter_length=1,
-                            name='{}/out2'.format(iaf_name),
-                            kernel_initializer=final_kernel_init)
-        mean, scale_params = tf.split(out, num_or_size_splits=2, axis=2)
+        mean = masked.conv1d(l, num_filters=out_width // 2, filter_length=1,
+                             name='{}/out2_mean'.format(iaf_name))
+        # the kernel_initializer keeps the scale in a reasonable small range.
+        scale_kernel_initializer = (tf.truncated_normal_initializer(mean=-0.03, stddev=0.1)
+                                    if use_log_scale
+                                    else tf.truncated_normal_initializer(mean=-0.01, stddev=0.1))
+        scale_params = masked.conv1d(
+            l, num_filters=out_width // 2, filter_length=1,
+            name='{}/out2_scale'.format(iaf_name),
+            kernel_initializer=scale_kernel_initializer)
+
         if use_log_scale:
             log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
             scale = tf.exp(log_scale)

@@ -10,7 +10,7 @@ from wavenet.wavenet import Fastgen
 
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-with open('../config_jsons/wavenet.json', 'rt') as F:
+with open('../config_jsons/wavenet_mol.json', 'rt') as F:
     configs = json.load(F)
 hparams = Namespace(**configs)
 
@@ -23,7 +23,7 @@ mel_en_shape = [batch_size, hparams.deconv_width]
 wav_ph = tf.placeholder(tf.float32, wav_shape)
 mel_en_ph = tf.placeholder(tf.float32, mel_en_shape)
 inputs = {'wav': wav_ph,
-          'mel_en': mel_en_ph}
+          'encoding': mel_en_ph}
 tf.set_random_seed(12345)
 fg_dict = fastgen.sample(inputs)
 

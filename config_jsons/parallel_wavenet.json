@@ -1,14 +1,16 @@
 {
+  "lr_schedule": [[0, 1e-4], [90000, 6e-5], [120000, 4e-5],
+                  [150000, 2e-5], [180000, 6e-6], [210000, 2e-6]],
   "num_iters": 200000,
   "wave_length": 7680,
   "num_stages": 10,
-  "num_iaf_layers": [10, 10, 20],
+  "num_iaf_layers": [10, 10, 10, 30],
   "filter_length": 3,
-  "width": 512,
-  "skip_width": 256,
+  "width": 64,
   "deconv_width": 256,
   "deconv_config": [[40, 10], [80, 20]],
   "use_mu_law": false,
+  "use_log_scale": false,
   "num_samples": 100,
   "power_loss_factor": 1.0
 }

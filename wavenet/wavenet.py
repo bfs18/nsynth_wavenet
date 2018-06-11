@@ -328,8 +328,7 @@ class Fastgen(object):
         s = (utils.linear(s, skip_width, skip_width, name='out1') +
              utils.linear(mel_en, deconv_width, skip_width, name='mel_cond_out1'))
         s = tf.nn.relu(s)
-        out = utils.linear(s, skip_width, out_width, name='out2')
-        out = tf.reshape(out, [-1, out_width])
+        out = utils.linear(s, skip_width, out_width, name='out2')  # [batch_size, 1, out_width]
 
         if loss_type == 'ce':
             sample = loss_func.ce_sample(out, quant_chann)

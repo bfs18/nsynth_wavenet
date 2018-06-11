@@ -84,7 +84,7 @@ def ce_sample(logits, quant_chann):
     """
     dist = tf.distributions.Categorical(logits=logits)
     s = dist.sample(1) - tf.cast(quant_chann / 2, tf.int32)
-    s = tf.expand_dims(s[0], axis=1)
+    s = s[0]  # first dim of dist.sample is the number of samples
     return s
 
 
@@ -99,26 +99,25 @@ def mol_sample(mol_params, quant_chann, use_log_scales=True):
                      x_quantized is casted to [-quant_chann / 2, quant_chann / 2)
     """
     logit_probs, means, scale_params = tf.split(
-        mol_params, num_or_size_splits=3, axis=1)
-    nr_mix = mol_params.get_shape().as_list()[1] // 3
+        mol_params, num_or_size_splits=3, axis=2)
+    nr_mix = mol_params.get_shape().as_list()[2] // 3
 
     ru = tf.random_uniform(tf.shape(logit_probs), minval=1e-5, maxval=1. - 1e-5)
     sel = tf.one_hot(
-        tf.argmax(logit_probs - tf.log(-tf.log(ru)), axis=1),
+        tf.argmax(logit_probs - tf.log(-tf.log(ru)), axis=2),
         depth=nr_mix, dtype=tf.float32)
-    means = tf.reduce_sum(means * sel, axis=1)
+    means = tf.reduce_sum(means * sel, axis=2)
 
     if use_log_scales:
         log_scales = tf.clip_by_value(
-            tf.reduce_sum(scale_params * sel, axis=1), -7.0, 7.0)
+            tf.reduce_sum(scale_params * sel, axis=2), -7.0, 7.0)
         scales = tf.exp(log_scales)
     else:
         scales = tf.clip_by_value(
-            tf.reduce_sum(scale_params * sel, axis=1), tf.exp(-7.0), tf.exp(7.0))
+            tf.reduce_sum(scale_params * sel, axis=2), tf.exp(-7.0), tf.exp(7.0))
 
     ru2 = tf.random_uniform(tf.shape(means), minval=1e-5, maxval=1. - 1e-5)
     x = means + scales * (tf.log(ru2) - tf.log(1. - ru2))
     x = tf.clip_by_value(x, -1., 1. - 2. / quant_chann)
     x_quantized = utils.cast_quantize(x, quant_chann)
-    x_quantized = tf.expand_dims(x_quantized, axis=1)
     return x_quantized
