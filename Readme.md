@@ -25,5 +25,5 @@ The following examples are more of functional test than gaining good waves. The 
 Proper initial mean_tot and scale_tot values have positive impact on model convergence and numerical stability.
 According to the LJSpeech data distribution, proper initial values for mean_tot  and scale_tot should be 0.0 and 0.05.
 I modified the initializer to achieve it.  
-![data dist](tests/dist.png)   
+![data dist](tests/dist2.png)   
 The figure is pot by [this script](tests/test_wave_distribution.py)

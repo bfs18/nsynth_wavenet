@@ -24,7 +24,10 @@ def train(args):
     wn = wavenet.Wavenet(hparams, args.train_path)
 
     def _model_fn(_inputs_dict):
+        encode_dict = wn.encode_signal(_inputs_dict)
+        _inputs_dict.update(encode_dict)
         ff_dict = wn.feed_forward(_inputs_dict)
+        ff_dict.update(encode_dict)
         loss_dict = wn.calculate_loss(ff_dict)
         loss = loss_dict['loss']
         tf.add_to_collection(tf.GraphKeys.LOSSES, loss)

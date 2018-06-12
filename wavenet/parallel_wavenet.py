@@ -51,6 +51,10 @@ class ParallelWavenet(object):
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_log_scale = getattr(self.hparams, 'use_log_scale', True)
+        # in parallel wavenet paper, gate width is the same with residual width
+        # not double of that.
+        # gate_width = 2 * width
+        gate_width = width
 
         mel = inputs['mel']
         x = inputs['x']
@@ -68,13 +72,13 @@ class ParallelWavenet(object):
             dilation = 2 ** (i % num_stages)
             d = masked.conv1d(
                 l,
-                num_filters=2 * width,
+                num_filters=gate_width,
                 filter_length=filter_length,
                 dilation=dilation,
                 name='{}/dilated_conv_{:d}'.format(iaf_name, i + 1))
             c = masked.conv1d(
                 mel_en,
-                num_filters=2 * width,
+                num_filters=gate_width,
                 filter_length=1,
                 name='{}/mel_cond_{:d}'.format(iaf_name, i + 1))
             d = wavenet._condition(d, c)
@@ -158,6 +162,8 @@ class ParallelWavenet(object):
         new_x = x * scale_tot + mean_tot
 
         if DETAIL_LOG:
+            tf.summary.scalar('new_x', tf.reduce_mean(new_x))
+            tf.summary.scalar('new_x_abs', tf.reduce_mean(tf.abs(new_x)))
             tf.summary.scalar('mean_tot', tf.reduce_mean(mean_tot))
             tf.summary.scalar('scale_tot', tf.reduce_mean(scale_tot))
             tf.summary.scalar('log_scale_tot', tf.reduce_mean(log_scale_tot))
@@ -198,16 +204,16 @@ class ParallelWavenet(object):
         rl = self._logistic_0_1(batch_size * num_samples, length)
         mean = utils.tf_repeat(mean, [num_samples, 1])
         scale = utils.tf_repeat(scale, [num_samples, 1])
-        # (x_i|x_<i), x given x_previous
+        # (x_i|x_<i), x given x_previous from student
         x_xp = rl * scale + mean
 
         # clip x and x_xp to real audio range [-1.0, 1.0)
         # if use_mu_law = True,
         # take iaf output as mu_law encoded real audio signal.
-        x_scaled = self._clip_quant_scale(x, quant_chann, use_mu_law)
-        x_xp_scaled = self._clip_quant_scale(x_xp, quant_chann, use_mu_law)
+        # x_scaled = self._clip_quant_scale(x, quant_chann, use_mu_law)
+        # x_xp_scaled = self._clip_quant_scale(x_xp, quant_chann, use_mu_law)
 
-        wn_ff_dict = teacher.feed_forward({'wav': x_scaled,
+        wn_ff_dict = teacher.feed_forward({'wav_scaled': x,
                                            'mel': mel})
         te_mol = wn_ff_dict['out_params']
         te_mol = utils.tf_repeat(te_mol, [num_samples, 1, 1])
@@ -215,7 +221,7 @@ class ParallelWavenet(object):
         # teacher always use log_scale, so use_log_scale of
         # loss_func.mol_log_probs is set to default value True.
         log_te_probs = loss_func.mol_log_probs(
-            te_mol, x_xp_scaled, quant_chann)
+            te_mol, x_xp, quant_chann)
         # H_Ps_Pt for batch * length
         H_Ps_Pt_bl = -tf.reduce_mean(
             tf.reshape(log_te_probs, [batch_size, num_samples, length]),
@@ -264,8 +270,9 @@ class ParallelWavenet(object):
             tf.squared_difference(orig_mag_pow, pred_mag_pow))
         return {'power_loss': power_loss}
 
-    def calculate_loss(self, ff_dict, num_samples=100):
+    def calculate_loss(self, ff_dict):
         plf = self.hparams.power_loss_factor
+        num_samples = self.hparams.num_samples
         loss_dict = self.kl_loss(ff_dict, num_samples)
         loss = loss_dict['kl_loss']
         if plf > 0.0:

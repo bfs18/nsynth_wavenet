@@ -91,6 +91,29 @@ class Wavenet(object):
         mel_en = _deconv_stack(mel, deconv_width, deconv_config)
         return {'encoding': mel_en}
 
+    def encode_signal(self, inputs):
+        ###
+        # Encode the source with 8-bit Mu-Law or just use 16-bit signal.
+        ###
+        quant_chann = self.quant_chann
+        use_mu_law = self.use_mu_law
+
+        x = inputs['wav']
+        if use_mu_law:
+            x_quantized = utils.mu_law(x)
+            x_scaled = tf.cast(x_quantized, tf.float32) / (quant_chann / 2.)
+            real_targets = x_scaled
+            cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
+        else:
+            x_quantized = utils.cast_quantize(x, quant_chann)
+            x_scaled = x
+            real_targets = x
+            cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
+
+        return {'wav_scaled': x_scaled,
+                'real_targets': real_targets,
+                'cate_targets': cate_targets}
+
     def feed_forward(self, inputs):
         """Build the graph for this configuration.
 
@@ -106,9 +129,11 @@ class Wavenet(object):
         filter_length = self.hparams.filter_length
         width = self.hparams.width
         skip_width = self.hparams.skip_width
-        use_mu_law = self.use_mu_law
-        quant_chann = self.quant_chann
         out_width = self.out_width
+        # in parallel wavenet paper, gate width is the same with residual width
+        # not double of that.
+        # gate_width = 2 * width
+        gate_width = width
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -121,20 +146,7 @@ class Wavenet(object):
         ds_dict = self.deconv_stack({'mel': mel})
         mel_en = ds_dict['encoding']
 
-        ###
-        # Encode the source with 8-bit Mu-Law or just use 16-bit signal.
-        ###
-        x = inputs['wav']
-        if use_mu_law:
-            x_quantized = utils.mu_law(x)
-            x_scaled = tf.cast(x_quantized, tf.float32) / (quant_chann / 2.)
-            real_targets = x_scaled
-            cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
-        else:
-            x_quantized = utils.cast_quantize(x, quant_chann)
-            x_scaled = x
-            real_targets = x
-            cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
+        x_scaled = inputs['wav_scaled']
         x_scaled = tf.expand_dims(x_scaled, 2)
 
         ###
@@ -153,13 +165,13 @@ class Wavenet(object):
             dilation = 2 ** (i % num_stages)
             d = masked.conv1d(
                 l,
-                num_filters=2 * width,
+                num_filters=gate_width,
                 filter_length=filter_length,
                 dilation=dilation,
                 name='dilated_conv_%d' % (i + 1))
             c = masked.conv1d(
                 mel_en,
-                num_filters=2 * width,
+                num_filters=gate_width,
                 filter_length=1,
                 name='mel_cond_%d' % (i + 1))
             d = _condition(d, c)
@@ -180,16 +192,9 @@ class Wavenet(object):
         c = masked.conv1d(mel_en, num_filters=skip_width, filter_length=1, name='mel_cond_out1')
         s = _condition(s, c)
         s = tf.nn.relu(s)
-        # when using mol loss, the model always predicts log_scale, the initializer makes
-        # the log_scale in a reasonable small range to speed up convergence.
-        final_kernel_init = (tf.truncated_normal_initializer(0.0, 0.01) if self.loss_type == 'mol'
-                             else tf.uniform_unit_scaling_initializer(1.0))
-        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2',
-                            kernel_initializer=final_kernel_init)
+        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2')
 
-        return {'real_targets': real_targets,
-                'cate_targets': cate_targets,
-                'encoding': mel_en,
+        return {'encoding': mel_en,
                 'out_params': out}
 
     def calculate_loss(self, ff_dict):

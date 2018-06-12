@@ -4,7 +4,6 @@ import librosa
 import json
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 from argparse import Namespace
 sys.path.append(os.path.dirname(os.getcwd()))
 from wavenet.parallel_wavenet import ParallelWavenet
@@ -62,24 +61,9 @@ rl = pff_vals['rand_input']
 x_ = rl * scale + mean
 print(np.all(scale > 0.))
 print(np.allclose(x, x_))
-
-# plot the logistic(0, 1) random variables.
-rn = np.random.normal(loc=0., scale=1., size=rl.flatten().shape)
-plt.subplot(2, 1, 1)
-plt.hist(rl.flatten(), 100, density=True, facecolor='g', alpha=0.75)
-plt.xlabel('Logistic random variables')
-plt.ylabel('Probability')
-plt.title('Histogram of Logistic random variables')
-plt.grid(True)
-
-plt.subplot(2, 1, 2)
-plt.hist(rn.flatten(), 100, density=True, facecolor='g', alpha=0.75)
-plt.xlabel('Normal random variables')
-plt.ylabel('Probability')
-plt.title('Histogram of Normal random variables')
-plt.grid(True)
-
-plt.show()
+print(mean.mean())   # should be close to 0.0
+print(scale.mean())  # should be close to 0.05
+print(log_scale.mean())    # should be close to log(0.05)
 
 loss_vals, grad_vals = sess.run(
     [loss_dict, grads], feed_dict={mel_ph: mel_val, wav_ph: wav_val})
