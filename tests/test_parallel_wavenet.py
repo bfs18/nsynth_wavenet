@@ -61,9 +61,22 @@ rl = pff_vals['rand_input']
 x_ = rl * scale + mean
 print(np.all(scale > 0.))
 print(np.allclose(x, x_))
+print('========mean==========')
 print(mean.mean())   # should be close to 0.0
+print(mean.std())
+print('======abs(mean)=======')
+print(np.abs(mean).mean())
+print(np.abs(mean).std())
+print('========scale=========')
 print(scale.mean())  # should be close to 0.05
 print(log_scale.mean())    # should be close to log(0.05)
+print('==========x===========')
+print(x.mean())
+print(x.std())
+print('========abs(x)========')
+print(np.abs(x).mean())
+print(np.abs(x).std())
+print('======================')
 
 loss_vals, grad_vals = sess.run(
     [loss_dict, grads], feed_dict={mel_ph: mel_val, wav_ph: wav_val})

@@ -17,6 +17,7 @@ class ParallelWavenet(object):
             getattr(hparams, 'lr_schedule', wavenet.DEFAULT_LR_SCHEDULE))
         self.train_path = train_path
         self.use_mu_law = self.hparams.use_mu_law
+        self.use_log_scale = getattr(self.hparams, 'use_log_scale', True)
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -42,6 +43,16 @@ class ParallelWavenet(object):
         rl = tf.log(ru) - tf.log(1. - ru)
         return rl
 
+    @property
+    def final_kernel_mean(self):
+        # The final kernel_initializer keeps the scale in a reasonable small range.
+        # Tuned for LJSpeech
+        if self.use_mu_law:
+            normal_mean = -0.01 if self.use_log_scale else -0.001
+        else:
+            normal_mean = -0.03 if self.use_log_scale else -0.01
+        return normal_mean
+
     def _create_iaf(self, inputs, iaf_idx):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
@@ -50,7 +61,8 @@ class ParallelWavenet(object):
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
-        use_log_scale = getattr(self.hparams, 'use_log_scale', True)
+        use_log_scale = self.use_log_scale
+        fk_mean = self.final_kernel_mean
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
         # gate_width = 2 * width
@@ -100,16 +112,14 @@ class ParallelWavenet(object):
         l = wavenet._condition(l, c)
         l = tf.nn.relu(l)
 
-        mean = masked.conv1d(l, num_filters=out_width // 2, filter_length=1,
-                             name='{}/out2_mean'.format(iaf_name))
-        # the kernel_initializer keeps the scale in a reasonable small range.
-        scale_kernel_initializer = (tf.truncated_normal_initializer(mean=-0.03, stddev=0.1)
-                                    if use_log_scale
-                                    else tf.truncated_normal_initializer(mean=-0.01, stddev=0.1))
+        mean = masked.conv1d(
+            l, num_filters=out_width // 2, filter_length=1,
+            name='{}/out2_mean'.format(iaf_name),
+            kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
         scale_params = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_scale'.format(iaf_name),
-            kernel_initializer=scale_kernel_initializer)
+            kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01))
 
         if use_log_scale:
             log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
@@ -163,7 +173,9 @@ class ParallelWavenet(object):
 
         if DETAIL_LOG:
             tf.summary.scalar('new_x', tf.reduce_mean(new_x))
+            tf.summary.scalar('new_x_std', utils.reduce_std(new_x))
             tf.summary.scalar('new_x_abs', tf.reduce_mean(tf.abs(new_x)))
+            tf.summary.scalar('new_x_abs_std', utils.reduce_std(tf.abs(new_x)))
             tf.summary.scalar('mean_tot', tf.reduce_mean(mean_tot))
             tf.summary.scalar('scale_tot', tf.reduce_mean(scale_tot))
             tf.summary.scalar('log_scale_tot', tf.reduce_mean(log_scale_tot))

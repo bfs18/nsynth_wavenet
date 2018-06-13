@@ -25,5 +25,17 @@ The following examples are more of functional test than gaining good waves. The 
 Proper initial mean_tot and scale_tot values have positive impact on model convergence and numerical stability.
 According to the LJSpeech data distribution, proper initial values for mean_tot  and scale_tot should be 0.0 and 0.05.
 I modified the initializer to achieve it.  
-![data dist](tests/dist2.png)   
+![data dist](tests/figures/dist2.png)   
 The figure is pot by [this script](tests/test_wave_distribution.py)
+
+I found straightforward method to determine whether a parallel wavenet is running OK.
+Compare the values of `new_x, new_x_std, new_x_abs, new_x_abs_std` listed in tensorboard to statistics of real data.
+If there is no difference of many orders of magnitudes, the training process is moving in the right direction.   
+
+e.g. The first tensorboard figure comes from a parallel wavenet trained without power lowss.
+The values of `new_x, new_x_abs` are too large OK compared to real data. So I cannot get meaningful waves from this model.
+The second is a model using power loss. It values are much more close real data. It is generating very noisy but to some extent meaningful waves.
+
+![x-x_abs1](tests/figures/x-x_abs.png)      
+![x-x_abs2](tests/figures/x-x_abs2.png)      
+![x-x_abs-dist](tests/figures/x_x_abs-stat.png)   
