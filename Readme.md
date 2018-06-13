@@ -33,8 +33,8 @@ Compare the values of `new_x, new_x_std, new_x_abs, new_x_abs_std` listed in ten
 If there is no difference of many orders of magnitudes, the training process is moving in the right direction.   
 
 e.g. The first tensorboard figure comes from a parallel wavenet trained without power lowss.
-The values of `new_x, new_x_abs` are too large OK compared to real data. So I cannot get meaningful waves from this model.
-The second is a model using power loss. It values are much more close real data. It is generating very noisy but to some extent meaningful waves.
+The values of `new_x, new_x_abs` are too large compared to real data. So I cannot get meaningful waves from this model.
+The second is a model using power loss. It values are much closer real data. It is generating very noisy but to some extent meaningful waves.
 
 ![x-x_abs1](tests/figures/x-x_abs.png)      
 ![x-x_abs2](tests/figures/x-x_abs2.png)      
