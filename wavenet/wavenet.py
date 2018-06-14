@@ -258,6 +258,8 @@ class Fastgen(object):
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
+        # gate_width = 2 * width
+        gate_width = width
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
@@ -303,7 +305,7 @@ class Fastgen(object):
             d, inits, pushs = utils.causal_linear(
                 x=l,
                 n_inputs=width,
-                n_outputs=width * 2,
+                n_outputs=gate_width,
                 name='dilated_conv_%d' % (i + 1),
                 rate=dilation,
                 batch_size=batch_size,
@@ -316,7 +318,7 @@ class Fastgen(object):
 
             # local conditioning
             d += utils.linear(
-                mel_en, deconv_width, width * 2, name='mel_cond_%d' % (i + 1))
+                mel_en, deconv_width, gate_width, name='mel_cond_%d' % (i + 1))
 
             # gated cnn
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -324,10 +326,10 @@ class Fastgen(object):
             d = tf.sigmoid(d[:, :, :m]) * tf.tanh(d[:, :, m:])
 
             # residuals
-            l += utils.linear(d, width, width, name='res_%d' % (i + 1))
+            l += utils.linear(d, gate_width // 2, width, name='res_%d' % (i + 1))
 
             # skips
-            s += utils.linear(d, width, skip_width, name='skip_%d' % (i + 1))
+            s += utils.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1))
 
         s = tf.nn.relu(s)
         s = (utils.linear(s, skip_width, skip_width, name='out1') +

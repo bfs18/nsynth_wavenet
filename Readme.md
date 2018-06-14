@@ -28,13 +28,15 @@ I modified the initializer to achieve it.
 ![data dist](tests/figures/dist2.png)   
 The figure is pot by [this script](tests/test_wave_distribution.py)
 
-I found straightforward method to determine whether a parallel wavenet is running OK.
+Decreasing loss does not indicate that everything goes well.
+I found a straightforward method to determine whether a parallel wavenet is running OK. 
 Compare the values of `new_x, new_x_std, new_x_abs, new_x_abs_std` listed in tensorboard to statistics of real data.
 If there is no difference of many orders of magnitudes, the training process is moving in the right direction.   
 
 e.g. The first tensorboard figure comes from a parallel wavenet trained without power lowss.
 The values of `new_x, new_x_abs` are too large compared to real data. So I cannot get meaningful waves from this model.
-The second is a model using power loss. It values are much closer real data. It is generating very noisy but to some extent meaningful waves.
+The second is a model using power loss. Its values are much closer to real data. 
+And it is generating very noisy but to some extent meaningful waves.
 
 ![x-x_abs1](tests/figures/x-x_abs.png)      
 ![x-x_abs2](tests/figures/x-x_abs2.png)      
