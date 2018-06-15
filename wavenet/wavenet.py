@@ -14,7 +14,7 @@ DEFAULT_LR_SCHEDULE = {
     240000: 2e-6}
 
 
-def _deconv_stack(inputs, width, config, name=''):
+def _deconv_stack(inputs, width, config, name='', use_weight_norm=False):
     b, l, _ = inputs.get_shape().as_list()
     frame_shift = int(np.prod([c[1] for c in config]))
     mel_en = inputs
@@ -29,7 +29,8 @@ def _deconv_stack(inputs, width, config, name=''):
             num_filters=width,
             filter_length=fl,
             stride=s,
-            name=tc_name)
+            name=tc_name,
+            use_weight_norm=use_weight_norm)
     mel_en.set_shape([b, l * frame_shift, width])
     return mel_en
 
@@ -62,6 +63,7 @@ class Wavenet(object):
             getattr(hparams, 'lr_schedule', DEFAULT_LR_SCHEDULE))
         self.train_path = train_path
 
+        self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
         self.use_mu_law = self.hparams.use_mu_law
@@ -87,8 +89,10 @@ class Wavenet(object):
         mel = mel_inputs['mel']
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
+        use_weight_norm = self.use_weight_norm
 
-        mel_en = _deconv_stack(mel, deconv_width, deconv_config)
+        mel_en = _deconv_stack(mel, deconv_width, deconv_config,
+                               use_weight_norm=use_weight_norm)
         return {'encoding': mel_en}
 
     def encode_signal(self, inputs):
@@ -124,6 +128,7 @@ class Wavenet(object):
           A dict of outputs that includes the 'predictions', 'loss', the 'encoding',
           the 'quantized_input', and whatever metrics we want to track for eval.
         """
+        use_weight_norm = self.use_weight_norm
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_layers
         filter_length = self.hparams.filter_length
@@ -154,11 +159,13 @@ class Wavenet(object):
         ###
         l = masked.shift_right(x_scaled)
         l = masked.conv1d(
-            l, num_filters=width, filter_length=filter_length, name='startconv')
+            l, num_filters=width, filter_length=filter_length, name='startconv',
+            use_weight_norm=use_weight_norm)
 
         # Set up skip connections.
         s = masked.conv1d(
-            l, num_filters=skip_width, filter_length=1, name='skip_start')
+            l, num_filters=skip_width, filter_length=1, name='skip_start',
+            use_weight_norm=use_weight_norm)
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -168,12 +175,14 @@ class Wavenet(object):
                 num_filters=gate_width,
                 filter_length=filter_length,
                 dilation=dilation,
-                name='dilated_conv_%d' % (i + 1))
+                name='dilated_conv_%d' % (i + 1),
+                use_weight_norm=use_weight_norm)
             c = masked.conv1d(
                 mel_en,
                 num_filters=gate_width,
                 filter_length=1,
-                name='mel_cond_%d' % (i + 1))
+                name='mel_cond_%d' % (i + 1),
+                use_weight_norm=use_weight_norm)
             d = _condition(d, c)
 
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -183,16 +192,21 @@ class Wavenet(object):
             d = d_sigmoid * d_tanh
 
             l += masked.conv1d(
-                d, num_filters=width, filter_length=1, name='res_%d' % (i + 1))
+                d, num_filters=width, filter_length=1, name='res_%d' % (i + 1),
+                use_weight_norm=use_weight_norm)
             s += masked.conv1d(
-                d, num_filters=skip_width, filter_length=1, name='skip_%d' % (i + 1))
+                d, num_filters=skip_width, filter_length=1, name='skip_%d' % (i + 1),
+                use_weight_norm=use_weight_norm)
 
         s = tf.nn.relu(s)
-        s = masked.conv1d(s, num_filters=skip_width, filter_length=1, name='out1')
-        c = masked.conv1d(mel_en, num_filters=skip_width, filter_length=1, name='mel_cond_out1')
+        s = masked.conv1d(s, num_filters=skip_width, filter_length=1, name='out1',
+                          use_weight_norm=use_weight_norm)
+        c = masked.conv1d(mel_en, num_filters=skip_width, filter_length=1, name='mel_cond_out1',
+                          use_weight_norm=use_weight_norm)
         s = _condition(s, c)
         s = tf.nn.relu(s)
-        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2')
+        out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2',
+                            use_weight_norm=use_weight_norm)
 
         return {'encoding': mel_en,
                 'out_params': out}
@@ -223,6 +237,7 @@ class Fastgen(object):
         self.batch_size = batch_size
         self.hparams = hparams
 
+        self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.use_mu_law = self.hparams.use_mu_law
         self.loss_type = self.hparams.loss_type
         if self.use_mu_law:
@@ -254,6 +269,7 @@ class Fastgen(object):
         width = self.hparams.width
         skip_width = self.hparams.skip_width
         use_mu_law = self.use_mu_law
+        use_weight_norm = self.use_weight_norm
         quant_chann = self.quant_chann
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
@@ -287,7 +303,8 @@ class Fastgen(object):
             name='startconv',
             rate=1,
             batch_size=batch_size,
-            filter_length=filter_length)
+            filter_length=filter_length,
+            use_weight_norm=use_weight_norm)
 
         for init in inits:
             init_ops.append(init)
@@ -295,7 +312,8 @@ class Fastgen(object):
             push_ops.append(push)
 
         # Set up skip connections.
-        s = utils.linear(l, width, skip_width, name='skip_start')
+        s = utils.linear(l, width, skip_width, name='skip_start',
+                         use_weight_norm=use_weight_norm)
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -309,7 +327,8 @@ class Fastgen(object):
                 name='dilated_conv_%d' % (i + 1),
                 rate=dilation,
                 batch_size=batch_size,
-                filter_length=filter_length)
+                filter_length=filter_length,
+                use_weight_norm=use_weight_norm)
 
             for init in inits:
                 init_ops.append(init)
@@ -318,7 +337,8 @@ class Fastgen(object):
 
             # local conditioning
             d += utils.linear(
-                mel_en, deconv_width, gate_width, name='mel_cond_%d' % (i + 1))
+                mel_en, deconv_width, gate_width, name='mel_cond_%d' % (i + 1),
+                use_weight_norm=use_weight_norm)
 
             # gated cnn
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -326,16 +346,21 @@ class Fastgen(object):
             d = tf.sigmoid(d[:, :, :m]) * tf.tanh(d[:, :, m:])
 
             # residuals
-            l += utils.linear(d, gate_width // 2, width, name='res_%d' % (i + 1))
+            l += utils.linear(d, gate_width // 2, width, name='res_%d' % (i + 1),
+                              use_weight_norm=use_weight_norm)
 
             # skips
-            s += utils.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1))
+            s += utils.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1),
+                              use_weight_norm=use_weight_norm)
 
         s = tf.nn.relu(s)
-        s = (utils.linear(s, skip_width, skip_width, name='out1') +
-             utils.linear(mel_en, deconv_width, skip_width, name='mel_cond_out1'))
+        s = (utils.linear(s, skip_width, skip_width, name='out1',
+                          use_weight_norm=use_weight_norm) +
+             utils.linear(mel_en, deconv_width, skip_width, name='mel_cond_out1',
+                          use_weight_norm=use_weight_norm))
         s = tf.nn.relu(s)
-        out = utils.linear(s, skip_width, out_width, name='out2')  # [batch_size, 1, out_width]
+        out = utils.linear(s, skip_width, out_width, name='out2',
+                           use_weight_norm=use_weight_norm)  # [batch_size, 1, out_width]
 
         if loss_type == 'ce':
             sample = loss_func.ce_sample(out, quant_chann)

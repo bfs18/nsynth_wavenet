@@ -19,6 +19,7 @@ from __future__ import print_function
 
 # internal imports
 import tensorflow as tf
+from auxilaries.utils import get_kernel
 
 
 def shift_right(x):
@@ -114,7 +115,8 @@ def conv1d(x,
            dilation=1,
            causal=True,
            kernel_initializer=tf.uniform_unit_scaling_initializer(1.0),
-           biases_initializer=tf.constant_initializer(0.0)):
+           biases_initializer=tf.constant_initializer(0.0),
+           use_weight_norm=False):
     """Fast 1D convolution that supports causal padding and dilation.
 
     Args:
@@ -126,6 +128,7 @@ def conv1d(x,
       causal: Whether or not this is a causal convolution.
       kernel_initializer: The kernel initialization function.
       biases_initializer: The biases initialization function.
+      use_weight_norm: use weight normalization or not.
 
     Returns:
       y: The output of the 1D convolution.
@@ -139,8 +142,9 @@ def conv1d(x,
     padding = 'VALID' if causal else 'SAME'
 
     with tf.variable_scope(name):
-        weights = tf.get_variable(
-            'W', shape=kernel_shape, initializer=kernel_initializer)
+        weights = get_kernel(
+            kernel_shape=kernel_shape, name='W',
+            initializer=kernel_initializer, use_weight_norm=use_weight_norm)
         biases = tf.get_variable(
             'biases', shape=biases_shape, initializer=biases_initializer)
 
@@ -165,17 +169,61 @@ def trans_conv1d(x,
                  filter_length,
                  stride,
                  name,
+                 activation=tf.nn.tanh,
                  kernel_initializer=tf.uniform_unit_scaling_initializer(1.15),
-                 biases_initializer=tf.constant_initializer(0.0)):
+                 biases_initializer=tf.constant_initializer(0.0),
+                 use_weight_norm=False):
+    batch_size, length, num_input_channels = x.get_shape().as_list()
+    x_4d = tf.reshape(x, [batch_size, 1, length, num_input_channels])
+    output_length = stride * length
+
+    kernel_shape = (1, filter_length, num_filters, num_input_channels)
+    strides = (1, 1, stride, 1)
+    output_shape = (batch_size, 1, output_length, num_filters)
+    biases_shape = (num_filters,)
+    padding = 'SAME'
+
+    with tf.variable_scope(name):
+        weights = get_kernel(
+            kernel_shape=kernel_shape, name='kernel', deconv=True,
+            initializer=kernel_initializer, use_weight_norm=use_weight_norm)
+        biases = tf.get_variable(
+            'bias', shape=biases_shape, initializer=biases_initializer)
+
+    y = tf.nn.conv2d_transpose(
+        x_4d,
+        filter=weights,
+        output_shape=output_shape,
+        strides=strides,
+        padding=padding)
+
+    y = tf.nn.bias_add(y, biases)
+    if activation is not None:
+        y = activation(y)
+    y = tf.reshape(y, [batch_size, output_length, num_filters])
+    y.set_shape([batch_size, output_length, num_filters])
+    return y
+
+
+def _trans_conv1d(x,
+                  num_filters,
+                  filter_length,
+                  stride,
+                  name,
+                  activation=tf.nn.tanh,
+                  kernel_initializer=tf.uniform_unit_scaling_initializer(1.15),
+                  biases_initializer=tf.constant_initializer(0.0)):
     batch_size, length, num_input_channels = x.get_shape().as_list()
     x_4d = tf.reshape(x, [batch_size, 1, length, num_input_channels])
     y = tf.layers.conv2d_transpose(x_4d, num_filters, (1, filter_length), (1, stride),
                                    padding='SAME',
                                    use_bias=True,
-                                   activation=tf.nn.tanh,
+                                   activation=activation,
                                    kernel_initializer=kernel_initializer,
                                    bias_initializer=biases_initializer,
                                    name=name)
     y = tf.reshape(y, [batch_size, length * stride, num_filters])
     y.set_shape([batch_size, length * stride, num_filters])
     return y
+
+

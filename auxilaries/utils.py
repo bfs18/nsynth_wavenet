@@ -193,11 +193,34 @@ def tf_repeat(tensor, repeats):
     return repeated_tesnor
 
 
+def get_kernel(kernel_shape, initializer, name,
+               use_weight_norm=False, deconv=False):
+    if use_weight_norm:
+        # if deconv == True, the 2nd dim in kernel_shape is the output size
+        # if deconv == False, the 3rd dim in kernel_shape is the output size
+        if deconv:
+            norm_axis = (0, 2)
+        else:
+            norm_axis = (0, 1)
+
+        V = tf.get_variable(
+            '{}_V'.format(name), shape=kernel_shape[1:], initializer=initializer)
+        g = tf.get_variable(
+            '{}_g'.format(name), initializer=tf.norm(
+                V.initialized_value(), axis=norm_axis, keep_dims=True))
+        V_norm = tf.nn.l2_normalize(V, axis=norm_axis)
+        weights = tf.expand_dims(V_norm * g, axis=0)
+    else:
+        weights = tf.get_variable(
+            name, shape=kernel_shape, initializer=initializer)
+    return weights
+
+
 # ---------------------------------------------------
 # Neural Nets
 # ---------------------------------------------------
 def causal_linear(x, n_inputs, n_outputs, name, filter_length, rate,
-                  batch_size):
+                  batch_size, use_weight_norm=False):
     """Applies dilated convolution using queues.
 
     Assumes a filter_length of 3.
@@ -210,6 +233,7 @@ def causal_linear(x, n_inputs, n_outputs, name, filter_length, rate,
       filter_length: The length of the convolution, assumed to be 3.
       rate: The rate or dilation
       batch_size: Non-symbolic value for batch_size.
+      use_weight_norm: use weight normalization or not
 
     Returns:
       y: The output of the operation
@@ -229,12 +253,13 @@ def causal_linear(x, n_inputs, n_outputs, name, filter_length, rate,
     push_2 = q_2.enqueue(state_1)
 
     # get pretrained weights
-    w = tf.get_variable(
-        name=name + "/W",
-        shape=[1, filter_length, n_inputs, n_outputs],
-        dtype=tf.float32)
-    b = tf.get_variable(
-        name=name + "/biases", shape=[n_outputs], dtype=tf.float32)
+    with tf.variable_scope(name):
+        w = get_kernel(
+            kernel_shape=[1, filter_length, n_inputs, n_outputs],
+            name='W', initializer=None, use_weight_norm=use_weight_norm)
+        b = tf.get_variable(
+            name="biases", shape=[n_outputs], dtype=tf.float32)
+
     w_q_2 = tf.slice(w, [0, 0, 0, 0], [-1, 1, -1, -1])
     w_q_1 = tf.slice(w, [0, 1, 0, 0], [-1, 1, -1, -1])
     w_x = tf.slice(w, [0, 2, 0, 0], [-1, 1, -1, -1])
@@ -248,7 +273,7 @@ def causal_linear(x, n_inputs, n_outputs, name, filter_length, rate,
     return y, (init_1, init_2), (push_1, push_2)
 
 
-def linear(x, n_inputs, n_outputs, name):
+def linear(x, n_inputs, n_outputs, name, use_weight_norm=False):
     """Simple linear layer.
 
     Args:
@@ -256,14 +281,17 @@ def linear(x, n_inputs, n_outputs, name):
       n_inputs: The input number of channels.
       n_outputs: The output number of channels.
       name: The variable scope to provide to W and biases.
+      use_weight_norm: use weight normalization or not.
 
     Returns:
       y: The output of the operation.
     """
-    w = tf.get_variable(
-        name=name + "/W", shape=[1, 1, n_inputs, n_outputs], dtype=tf.float32)
-    b = tf.get_variable(
-        name=name + "/biases", shape=[n_outputs], dtype=tf.float32)
+    with tf.variable_scope(name):
+        w = get_kernel(
+            kernel_shape=[1, 1, n_inputs, n_outputs],
+            name='W', initializer=None, use_weight_norm=use_weight_norm)
+        b = tf.get_variable(
+            name="biases", shape=[n_outputs], dtype=tf.float32)
     y = tf.nn.bias_add(tf.matmul(x[:, 0, :], w[0][0]), b)
     y = tf.expand_dims(y, 1)
     return y

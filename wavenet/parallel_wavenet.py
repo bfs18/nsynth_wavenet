@@ -18,6 +18,8 @@ class ParallelWavenet(object):
         self.train_path = train_path
         self.use_mu_law = self.hparams.use_mu_law
         self.use_log_scale = getattr(self.hparams, 'use_log_scale', True)
+        self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
+
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -62,6 +64,7 @@ class ParallelWavenet(object):
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_log_scale = self.use_log_scale
+        use_weight_norm = self.use_weight_norm
         fk_mean = self.final_kernel_mean
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
@@ -74,11 +77,13 @@ class ParallelWavenet(object):
         iaf_name = 'iaf_{:d}'.format(iaf_idx + 1)
 
         mel_en = wavenet._deconv_stack(
-            mel, deconv_width, deconv_config, name=iaf_name)
+            mel, deconv_width, deconv_config, name=iaf_name,
+            use_weight_norm=use_weight_norm)
 
         l = masked.shift_right(x)
         l = masked.conv1d(l, num_filters=width, filter_length=filter_length,
-                          name='{}/start_conv'.format(iaf_name))
+                          name='{}/start_conv'.format(iaf_name),
+                          use_weight_norm=use_weight_norm)
 
         for i in range(num_layers):
             dilation = 2 ** (i % num_stages)
@@ -87,12 +92,14 @@ class ParallelWavenet(object):
                 num_filters=gate_width,
                 filter_length=filter_length,
                 dilation=dilation,
-                name='{}/dilated_conv_{:d}'.format(iaf_name, i + 1))
+                name='{}/dilated_conv_{:d}'.format(iaf_name, i + 1),
+                use_weight_norm=use_weight_norm)
             c = masked.conv1d(
                 mel_en,
                 num_filters=gate_width,
                 filter_length=1,
-                name='{}/mel_cond_{:d}'.format(iaf_name, i + 1))
+                name='{}/mel_cond_{:d}'.format(iaf_name, i + 1),
+                use_weight_norm=use_weight_norm)
             d = wavenet._condition(d, c)
 
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -102,24 +109,29 @@ class ParallelWavenet(object):
             d = d_sigmoid * d_tanh
 
             l += masked.conv1d(d, num_filters=width, filter_length=1,
-                               name='{}/res_{:d}'.format(iaf_name, i + 1))
+                               name='{}/res_{:d}'.format(iaf_name, i + 1),
+                               use_weight_norm=use_weight_norm)
 
         l = tf.nn.relu(l)
         l = masked.conv1d(l, num_filters=width, filter_length=1,
-                          name='{}/out1'.format(iaf_name))
+                          name='{}/out1'.format(iaf_name),
+                          use_weight_norm=use_weight_norm)
         c = masked.conv1d(mel_en, num_filters=width, filter_length=1,
-                          name='{}/mel_cond_out1'.format(iaf_name))
+                          name='{}/mel_cond_out1'.format(iaf_name),
+                          use_weight_norm=use_weight_norm)
         l = wavenet._condition(l, c)
         l = tf.nn.relu(l)
 
         mean = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_mean'.format(iaf_name),
-            kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+            kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
+            use_weight_norm=use_weight_norm)
         scale_params = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_scale'.format(iaf_name),
-            kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01))
+            kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01),
+            use_weight_norm=use_weight_norm)
 
         if use_log_scale:
             log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)

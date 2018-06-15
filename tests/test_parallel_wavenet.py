@@ -70,13 +70,20 @@ print(np.abs(mean).std())
 print('========scale=========')
 print(scale.mean())  # should be close to 0.05
 print(log_scale.mean())    # should be close to log(0.05)
-print('==========x===========')
+print('========new_x=========')
 print(x.mean())
 print(x.std())
-print('========abs(x)========')
+print('======abs(new_x)======')
 print(np.abs(x).mean())
 print(np.abs(x).std())
-print('======================')
+print('==========wav==========')
+print(wav_val.mean())
+print(wav_val.std())
+print('=======abs(wav)========')
+print(np.abs(wav_val).mean())
+print(np.abs(wav_val).std())
+print('=======================')
+
 
 loss_vals, grad_vals = sess.run(
     [loss_dict, grads], feed_dict={mel_ph: mel_val, wav_ph: wav_val})
