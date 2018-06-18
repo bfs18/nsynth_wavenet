@@ -5,6 +5,7 @@ import os
 from argparse import ArgumentParser, Namespace
 from wavenet import wavenet
 from deployment import model_deploy
+from auxilaries import reader
 
 slim = tf.contrib.slim
 
@@ -21,7 +22,33 @@ def train(args):
         configs = json.load(F)
     hparams = Namespace(**configs)
 
-    wn = wavenet.Wavenet(hparams, args.train_path)
+    wn = wavenet.Wavenet(hparams, os.path.abspath(os.path.expanduser(args.train_path)))
+
+    def _data_dep_init():
+        # slim.learning.train runs init_fn earlier than start_queue_runner
+        # so the the function got dead locker if use the `input_dict` in L76 as input
+        inputs_val = reader.get_init_batch(
+            wn.train_path, batch_size=args.total_batch_size, seq_len=wn.wave_length)
+        wave_data = inputs_val['wav']
+        mel_data = inputs_val['mel']
+
+        _inputs_dict = {
+            'wav': tf.placeholder(dtype=tf.float32, shape=wave_data.shape),
+            'mel': tf.placeholder(dtype=tf.float32, shape=mel_data.shape)}
+
+        encode_dict = wn.encode_signal(_inputs_dict)
+        _inputs_dict.update(encode_dict)
+        init_ff_dict = wn.feed_forward(_inputs_dict, init=True)
+
+        def callback(session):
+            tf.logging.info('Running data dependent initialization ' 
+                            'for weight normalization')
+            session.run(init_ff_dict,
+                        feed_dict={_inputs_dict['wav']: wave_data,
+                                   _inputs_dict['mel']: mel_data})
+            tf.logging.info('Done data dependent initialization '
+                            'for weight normalization')
+        return callback
 
     def _model_fn(_inputs_dict):
         encode_dict = wn.encode_signal(_inputs_dict)
@@ -91,6 +118,7 @@ def train(args):
         session_config = tf.ConfigProto(allow_soft_placement=True)
         session_config.gpu_options.allow_growth = True
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
+        data_dep_init_fn = _data_dep_init()
 
         slim.learning.train(
             train_tensor,
@@ -101,7 +129,8 @@ def train(args):
             log_every_n_steps=100,
             save_summaries_secs=600,
             save_interval_secs=3600,
-            session_config=session_config,)
+            session_config=session_config,
+            init_fn=data_dep_init_fn)
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@ inputs = {'wav': wav_ph,
 tf.set_random_seed(12345)
 encode_dict = wavenet.encode_signal(inputs)
 inputs.update(encode_dict)
-ff_dict = wavenet.feed_forward(inputs)
+ff_dict = wavenet.feed_forward(inputs, init=False)
 ff_dict.update(encode_dict)
 loss_dict = wavenet.calculate_loss(ff_dict)
 

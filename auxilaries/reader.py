@@ -18,9 +18,18 @@ from __future__ import division
 from __future__ import print_function
 
 # internal imports
+import os
 import tensorflow as tf
+import numpy as np
+import random
 
 from auxilaries import mel_extractor
+
+
+FEATURES = {
+    'audio_id': tf.FixedLenFeature([], dtype=tf.string),
+    'audio': tf.FixedLenFeature([], dtype=tf.string),
+    'length': tf.FixedLenFeature([], dtype=tf.int64)}
 
 
 class Dataset(object):
@@ -39,11 +48,7 @@ class Dataset(object):
             capacity=capacity,
             name='reader/input_producer')
         unused_eky, serialized_example = reader.read(path_queue)
-        features = {
-            'audio_id': tf.FixedLenFeature([], dtype=tf.string),
-            'audio': tf.FixedLenFeature([], dtype=tf.string),
-            'length': tf.FixedLenFeature([], dtype=tf.int64)}
-        example = tf.parse_single_example(serialized_example, features)
+        example = tf.parse_single_example(serialized_example, features=FEATURES)
         example['length'] = tf.cast(example['length'], tf.int32)
         audio = tf.decode_raw(example['audio'], tf.float32)
         example['audio'] = audio
@@ -73,4 +78,36 @@ class Dataset(object):
                 batch_size,
                 name='reader/fifo_batch')
         return {'key': key, 'wav': crop, 'mel': mel}
+
+
+def np_random_crop(vector, crop_len):
+    total_len = vector.shape[0]
+    last_idx = total_len - crop_len
+    start_idx = np.random.randint(low=0, high=last_idx + 1)
+    cropped = vector[start_idx: start_idx + crop_len]
+    return cropped
+
+
+def get_init_batch(train_path, batch_size, seq_len=7680, first_n=1000):
+    train_path = os.path.abspath(os.path.expanduser(train_path))
+
+    first_n_serialized_example = []
+    serialized_examples = tf.python_io.tf_record_iterator(train_path)
+    for i in range(first_n):
+        first_n_serialized_example.append(serialized_examples.__next__())
+    random.shuffle(first_n_serialized_example)
+
+    batch_waves = []
+    for i in range(batch_size):
+        serialized_example = first_n_serialized_example[i]
+        example_proto = tf.train.Example()
+        example_proto.ParseFromString(serialized_example)
+        bytes = example_proto.features.feature["audio"].bytes_list.value[0]
+        wave = np.frombuffer(bytes, dtype=np.float32)
+        batch_waves.append(np_random_crop(wave, crop_len=seq_len))
+    batch_waves = np.stack(batch_waves)
+    batch_mels = mel_extractor.batch_melspectrogram(batch_waves)
+
+    return {'wav': batch_waves, 'mel': batch_mels}
+
 

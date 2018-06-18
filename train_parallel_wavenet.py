@@ -7,6 +7,7 @@ from argparse import ArgumentParser, Namespace
 from wavenet import parallel_wavenet, wavenet
 from auxilaries import utils
 from deployment import model_deploy
+from auxilaries import reader
 
 slim = tf.contrib.slim
 
@@ -42,6 +43,24 @@ def train(args):
         configs = json.load(F)
     st_hparams = Namespace(**configs)
     pwn = parallel_wavenet.ParallelWavenet(st_hparams, teacher, args.train_path)
+
+    def _data_dep_init():
+        inputs_val = reader.get_init_batch(
+            pwn.train_path, batch_size=args.total_batch_size, seq_len=pwn.wave_length)
+        mel_data = inputs_val['mel']
+
+        _inputs_dict = {'mel': tf.placeholder(dtype=tf.float32, shape=mel_data.shape)}
+
+        init_ff_dict = pwn.feed_forward(_inputs_dict, init=True)
+
+        def callback(session):
+            tf.logging.info('Running data dependent initialization ' 
+                            'for weight normalization')
+            session.run(init_ff_dict,
+                        feed_dict={_inputs_dict['mel']: mel_data})
+            tf.logging.info('Done data dependent initialization '
+                            'for weight normalization')
+        return callback
 
     def _model_fn(_inputs_dict):
         ff_dict = pwn.feed_forward(_inputs_dict)
@@ -123,6 +142,11 @@ def train(args):
         # teacher use EMA
         te_vars = {'{}/ExponentialMovingAverage'.format(tv.name[:-2]): tv for tv in te_vars}
         restore_init_fn = tf.contrib.framework.assign_from_checkpoint_fn(te_ckpt, te_vars)
+        data_dep_init_fn = _data_dep_init()
+
+        def group_init_fn(session):
+            restore_init_fn(session)
+            data_dep_init_fn(session)
 
         session_config = tf.ConfigProto(allow_soft_placement=True)
         session_config.gpu_options.allow_growth = True
@@ -138,7 +162,7 @@ def train(args):
             save_summaries_secs=600,
             save_interval_secs=3600,
             session_config=session_config,
-            init_fn=restore_init_fn)
+            init_fn=group_init_fn)
 
 
 if __name__ == '__main__':

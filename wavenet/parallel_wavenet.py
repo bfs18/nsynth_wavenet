@@ -17,6 +17,7 @@ class ParallelWavenet(object):
             getattr(hparams, 'lr_schedule', wavenet.DEFAULT_LR_SCHEDULE))
         self.train_path = train_path
         self.use_mu_law = self.hparams.use_mu_law
+        self.wave_length = self.hparams.wave_length
         self.use_log_scale = getattr(self.hparams, 'use_log_scale', True)
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
 
@@ -34,7 +35,7 @@ class ParallelWavenet(object):
 
     def get_batch(self, batch_size):
         train_path = self.train_path
-        wave_length = self.hparams.wave_length
+        wave_length = self.wave_length
         return wavenet._get_batch(train_path, batch_size, wave_length)
 
     @staticmethod
@@ -55,7 +56,7 @@ class ParallelWavenet(object):
             normal_mean = -0.03 if self.use_log_scale else -0.01
         return normal_mean
 
-    def _create_iaf(self, inputs, iaf_idx):
+    def _create_iaf(self, inputs, iaf_idx, init):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
         filter_length = self.hparams.filter_length
@@ -78,12 +79,12 @@ class ParallelWavenet(object):
 
         mel_en = wavenet._deconv_stack(
             mel, deconv_width, deconv_config, name=iaf_name,
-            use_weight_norm=use_weight_norm)
+            use_weight_norm=use_weight_norm, init=init)
 
         l = masked.shift_right(x)
         l = masked.conv1d(l, num_filters=width, filter_length=filter_length,
                           name='{}/start_conv'.format(iaf_name),
-                          use_weight_norm=use_weight_norm)
+                          use_weight_norm=use_weight_norm, init=init)
 
         for i in range(num_layers):
             dilation = 2 ** (i % num_stages)
@@ -93,13 +94,15 @@ class ParallelWavenet(object):
                 filter_length=filter_length,
                 dilation=dilation,
                 name='{}/dilated_conv_{:d}'.format(iaf_name, i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm,
+                init=init)
             c = masked.conv1d(
                 mel_en,
                 num_filters=gate_width,
                 filter_length=1,
                 name='{}/mel_cond_{:d}'.format(iaf_name, i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm,
+                init=init)
             d = wavenet._condition(d, c)
 
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -110,28 +113,28 @@ class ParallelWavenet(object):
 
             l += masked.conv1d(d, num_filters=width, filter_length=1,
                                name='{}/res_{:d}'.format(iaf_name, i + 1),
-                               use_weight_norm=use_weight_norm)
+                               use_weight_norm=use_weight_norm, init=init)
 
         l = tf.nn.relu(l)
         l = masked.conv1d(l, num_filters=width, filter_length=1,
                           name='{}/out1'.format(iaf_name),
-                          use_weight_norm=use_weight_norm)
+                          use_weight_norm=use_weight_norm, init=init)
         c = masked.conv1d(mel_en, num_filters=width, filter_length=1,
                           name='{}/mel_cond_out1'.format(iaf_name),
-                          use_weight_norm=use_weight_norm)
+                          use_weight_norm=use_weight_norm, init=init)
         l = wavenet._condition(l, c)
         l = tf.nn.relu(l)
 
         mean = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_mean'.format(iaf_name),
-            kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
-            use_weight_norm=use_weight_norm)
+            # kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
+            use_weight_norm=use_weight_norm, init=init)
         scale_params = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_scale'.format(iaf_name),
-            kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01),
-            use_weight_norm=use_weight_norm)
+            # kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01),
+            use_weight_norm=use_weight_norm, init=init)
 
         if use_log_scale:
             log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
@@ -152,7 +155,7 @@ class ParallelWavenet(object):
                 'scale': scale,
                 'log_scale': log_scale}
 
-    def feed_forward(self, inputs):
+    def feed_forward(self, inputs, init=False):
         num_stages = self.hparams.num_stages
         num_iafs = len(self.hparams.num_iaf_layers)
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
@@ -169,7 +172,7 @@ class ParallelWavenet(object):
         iaf_x = tf.expand_dims(x, axis=2)
         mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
         for iaf_idx in range(num_iafs):
-            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx)
+            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx, init=init)
             iaf_x = iaf_dict['x']
             scale = iaf_dict['scale']
             log_scale = iaf_dict['log_scale']

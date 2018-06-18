@@ -14,7 +14,8 @@ DEFAULT_LR_SCHEDULE = {
     240000: 2e-6}
 
 
-def _deconv_stack(inputs, width, config, name='', use_weight_norm=False):
+def _deconv_stack(inputs, width, config, name='',
+                  use_weight_norm=False, init=False):
     b, l, _ = inputs.get_shape().as_list()
     frame_shift = int(np.prod([c[1] for c in config]))
     mel_en = inputs
@@ -30,7 +31,8 @@ def _deconv_stack(inputs, width, config, name='', use_weight_norm=False):
             filter_length=fl,
             stride=s,
             name=tc_name,
-            use_weight_norm=use_weight_norm)
+            use_weight_norm=use_weight_norm,
+            init=init)
     mel_en.set_shape([b, l * frame_shift, width])
     return mel_en
 
@@ -62,6 +64,7 @@ class Wavenet(object):
         self.learning_rate_schedule = dict(
             getattr(hparams, 'lr_schedule', DEFAULT_LR_SCHEDULE))
         self.train_path = train_path
+        self.wave_length = self.hparams.wave_length
 
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         # only take the variables used both by
@@ -82,17 +85,18 @@ class Wavenet(object):
 
     def get_batch(self, batch_size):
         train_path = self.train_path
-        wave_length = self.hparams.wave_length
+        wave_length = self.wave_length
         return _get_batch(train_path, batch_size, wave_length)
 
-    def deconv_stack(self, mel_inputs):
+    def deconv_stack(self, mel_inputs, init):
         mel = mel_inputs['mel']
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_weight_norm = self.use_weight_norm
 
         mel_en = _deconv_stack(mel, deconv_width, deconv_config,
-                               use_weight_norm=use_weight_norm)
+                               use_weight_norm=use_weight_norm,
+                               init=init)
         return {'encoding': mel_en}
 
     def encode_signal(self, inputs):
@@ -118,11 +122,12 @@ class Wavenet(object):
                 'real_targets': real_targets,
                 'cate_targets': cate_targets}
 
-    def feed_forward(self, inputs):
+    def feed_forward(self, inputs, init=False):
         """Build the graph for this configuration.
 
         Args:
           inputs: A dict of inputs. For training, should contain 'wav'.
+          init: data dependent initialization.
 
         Returns:
           A dict of outputs that includes the 'predictions', 'loss', the 'encoding',
@@ -137,8 +142,8 @@ class Wavenet(object):
         out_width = self.out_width
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
-        # gate_width = 2 * width
-        gate_width = width
+        gate_width = 2 * width
+        # gate_width = width
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -148,7 +153,7 @@ class Wavenet(object):
         # (l1, s1) = (40, 10), (l2, s2) = (80, 20) is a proper configuration.
         # it is almost consistent with mel analysis frame shift (200) and frame length (800).
         mel = inputs['mel']
-        ds_dict = self.deconv_stack({'mel': mel})
+        ds_dict = self.deconv_stack({'mel': mel}, init=init)
         mel_en = ds_dict['encoding']
 
         x_scaled = inputs['wav_scaled']
@@ -160,12 +165,12 @@ class Wavenet(object):
         l = masked.shift_right(x_scaled)
         l = masked.conv1d(
             l, num_filters=width, filter_length=filter_length, name='startconv',
-            use_weight_norm=use_weight_norm)
+            use_weight_norm=use_weight_norm, init=init)
 
         # Set up skip connections.
         s = masked.conv1d(
             l, num_filters=skip_width, filter_length=1, name='skip_start',
-            use_weight_norm=use_weight_norm)
+            use_weight_norm=use_weight_norm, init=init)
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -176,13 +181,15 @@ class Wavenet(object):
                 filter_length=filter_length,
                 dilation=dilation,
                 name='dilated_conv_%d' % (i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm,
+                init=init)
             c = masked.conv1d(
                 mel_en,
                 num_filters=gate_width,
                 filter_length=1,
                 name='mel_cond_%d' % (i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm,
+                init=init)
             d = _condition(d, c)
 
             assert d.get_shape().as_list()[2] % 2 == 0
@@ -193,20 +200,20 @@ class Wavenet(object):
 
             l += masked.conv1d(
                 d, num_filters=width, filter_length=1, name='res_%d' % (i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm, init=init)
             s += masked.conv1d(
                 d, num_filters=skip_width, filter_length=1, name='skip_%d' % (i + 1),
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm, init=init)
 
         s = tf.nn.relu(s)
         s = masked.conv1d(s, num_filters=skip_width, filter_length=1, name='out1',
-                          use_weight_norm=use_weight_norm)
+                          use_weight_norm=use_weight_norm, init=init)
         c = masked.conv1d(mel_en, num_filters=skip_width, filter_length=1, name='mel_cond_out1',
-                          use_weight_norm=use_weight_norm)
+                          use_weight_norm=use_weight_norm, init=init)
         s = _condition(s, c)
         s = tf.nn.relu(s)
         out = masked.conv1d(s, num_filters=out_width, filter_length=1, name='out2',
-                            use_weight_norm=use_weight_norm)
+                            use_weight_norm=use_weight_norm, init=init)
 
         return {'encoding': mel_en,
                 'out_params': out}

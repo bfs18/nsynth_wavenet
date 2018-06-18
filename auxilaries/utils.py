@@ -25,6 +25,8 @@ import librosa
 import numpy as np
 import tensorflow as tf
 
+from wavenet.masked import get_kernel
+
 slim = tf.contrib.slim
 
 
@@ -191,29 +193,6 @@ def tf_repeat(tensor, repeats):
     new_shape = [_prod(s, r) for s, r in zip(orig_shape, repeats)]
     repeated_tesnor.set_shape(new_shape)
     return repeated_tesnor
-
-
-def get_kernel(kernel_shape, initializer, name,
-               use_weight_norm=False, deconv=False):
-    if use_weight_norm:
-        # if deconv == True, the 2nd dim in kernel_shape is the output size
-        # if deconv == False, the 3rd dim in kernel_shape is the output size
-        if deconv:
-            norm_axis = (0, 2)
-        else:
-            norm_axis = (0, 1)
-
-        V = tf.get_variable(
-            '{}_V'.format(name), shape=kernel_shape[1:], initializer=initializer)
-        g = tf.get_variable(
-            '{}_g'.format(name), initializer=tf.norm(
-                V.initialized_value(), axis=norm_axis, keep_dims=True))
-        V_norm = tf.nn.l2_normalize(V, axis=norm_axis)
-        weights = tf.expand_dims(V_norm * g, axis=0)
-    else:
-        weights = tf.get_variable(
-            name, shape=kernel_shape, initializer=initializer)
-    return weights
 
 
 # ---------------------------------------------------

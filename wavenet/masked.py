@@ -19,7 +19,9 @@ from __future__ import print_function
 
 # internal imports
 import tensorflow as tf
-from auxilaries.utils import get_kernel
+
+
+WN_INIT_SCALE = 0.05
 
 
 def shift_right(x):
@@ -108,15 +110,42 @@ def batch_to_time(x, block_size):
     return y
 
 
+def get_kernel(kernel_shape, initializer, name,
+               use_weight_norm=False, deconv=False):
+    if use_weight_norm:
+        # if deconv == True, the 2nd dim in kernel_shape is the output size
+        # if deconv == False, the 3rd dim in kernel_shape is the output size
+        if deconv:
+            norm_axis = (0, 1, 3)
+            out_dim = kernel_shape[2]
+            g_bc_shape = [1, 1, out_dim, 1]
+        else:
+            norm_axis = (0, 1, 2)
+            out_dim = kernel_shape[3]
+            g_bc_shape = [1, 1, 1, out_dim]
+
+        V = tf.get_variable(
+            '{}_V'.format(name), shape=kernel_shape, initializer=initializer)
+        g = tf.get_variable('{}_g'.format(name), shape=[out_dim],
+                            initializer=tf.constant_initializer(1.0))
+        V_norm = tf.nn.l2_normalize(V, axis=norm_axis)
+        weights = V_norm * tf.reshape(g, shape=g_bc_shape)
+    else:
+        weights = tf.get_variable(
+            name, shape=kernel_shape, initializer=initializer)
+    return weights
+
+
 def conv1d(x,
            num_filters,
            filter_length,
            name,
            dilation=1,
            causal=True,
-           kernel_initializer=tf.uniform_unit_scaling_initializer(1.0),
+           kernel_initializer=tf.random_normal_initializer(0, 0.05),
            biases_initializer=tf.constant_initializer(0.0),
-           use_weight_norm=False):
+           use_weight_norm=False,
+           init=False):
     """Fast 1D convolution that supports causal padding and dilation.
 
     Args:
@@ -129,6 +158,7 @@ def conv1d(x,
       kernel_initializer: The kernel initialization function.
       biases_initializer: The biases initialization function.
       use_weight_norm: use weight normalization or not.
+      init: run data dependent initialization for g and b.
 
     Returns:
       y: The output of the 1D convolution.
@@ -141,7 +171,7 @@ def conv1d(x,
     biases_shape = [num_filters]
     padding = 'VALID' if causal else 'SAME'
 
-    with tf.variable_scope(name):
+    with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
         weights = get_kernel(
             kernel_shape=kernel_shape, name='W',
             initializer=kernel_initializer, use_weight_norm=use_weight_norm)
@@ -157,6 +187,17 @@ def conv1d(x,
                               x_ttb_shape[1], num_input_channels])
     y = tf.nn.conv2d(x_4d, weights, strides, padding=padding)
     y = tf.nn.bias_add(y, biases)
+
+    if use_weight_norm and init:
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+            g = tf.get_variable('W_g')
+            b = tf.get_variable('biases')
+            m_init, v_init = tf.nn.moments(y, [0, 1, 2])
+            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
+            with tf.control_dependencies(
+                    [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
+                y = tf.identity(y)
+
     y_shape = y.get_shape().as_list()
     y = tf.reshape(y, [y_shape[0], y_shape[2], num_filters])
     y = batch_to_time(y, dilation)
@@ -170,9 +211,10 @@ def trans_conv1d(x,
                  stride,
                  name,
                  activation=tf.nn.tanh,
-                 kernel_initializer=tf.uniform_unit_scaling_initializer(1.15),
+                 kernel_initializer=tf.random_normal_initializer(0, 0.05),
                  biases_initializer=tf.constant_initializer(0.0),
-                 use_weight_norm=False):
+                 use_weight_norm=False,
+                 init=False):
     batch_size, length, num_input_channels = x.get_shape().as_list()
     x_4d = tf.reshape(x, [batch_size, 1, length, num_input_channels])
     output_length = stride * length
@@ -183,7 +225,7 @@ def trans_conv1d(x,
     biases_shape = (num_filters,)
     padding = 'SAME'
 
-    with tf.variable_scope(name):
+    with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
         weights = get_kernel(
             kernel_shape=kernel_shape, name='kernel', deconv=True,
             initializer=kernel_initializer, use_weight_norm=use_weight_norm)
@@ -196,8 +238,18 @@ def trans_conv1d(x,
         output_shape=output_shape,
         strides=strides,
         padding=padding)
-
     y = tf.nn.bias_add(y, biases)
+
+    if use_weight_norm and init:
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+            g = tf.get_variable('kernel_g')
+            b = tf.get_variable('bias')
+            m_init, v_init = tf.nn.moments(y, [0, 1, 2])
+            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
+            with tf.control_dependencies(
+                    [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
+                y = tf.identity(y)
+
     if activation is not None:
         y = activation(y)
     y = tf.reshape(y, [batch_size, output_length, num_filters])
