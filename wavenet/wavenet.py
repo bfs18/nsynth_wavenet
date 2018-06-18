@@ -142,8 +142,8 @@ class Wavenet(object):
         out_width = self.out_width
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
-        gate_width = 2 * width
-        # gate_width = width
+        # gate_width = 2 * width
+        gate_width = width
 
         ###
         # The Transpose Convolution Stack for mel feature.
