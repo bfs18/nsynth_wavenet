@@ -88,7 +88,7 @@ class Wavenet(object):
         wave_length = self.wave_length
         return _get_batch(train_path, batch_size, wave_length)
 
-    def deconv_stack(self, mel_inputs, init):
+    def deconv_stack(self, mel_inputs, init=False):
         mel = mel_inputs['mel']
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
