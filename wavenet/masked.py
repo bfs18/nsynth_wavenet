@@ -21,7 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 
 
-WN_INIT_SCALE = 0.05
+WN_INIT_SCALE = 1.0
 
 
 def shift_right(x):
@@ -196,7 +196,12 @@ def conv1d(x,
             scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
             with tf.control_dependencies(
                     [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
-                y = tf.identity(y)
+                # y = tf.identity(y)
+                # the conv outputs should be recalculated after init for g and b
+                weights = get_kernel(kernel_shape=kernel_shape, name='W',
+                                     initializer=None, use_weight_norm=use_weight_norm)
+                y = tf.nn.conv2d(x_4d, weights, strides, padding=padding)
+                y = tf.nn.bias_add(y, biases)
 
     y_shape = y.get_shape().as_list()
     y = tf.reshape(y, [y_shape[0], y_shape[2], num_filters])
@@ -248,7 +253,14 @@ def trans_conv1d(x,
             scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
             with tf.control_dependencies(
                     [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
-                y = tf.identity(y)
+                # y = tf.identity(y)
+                weights = get_kernel(
+                    kernel_shape=kernel_shape, name='kernel', deconv=True,
+                    initializer=None, use_weight_norm=use_weight_norm)
+                y = tf.nn.conv2d_transpose(
+                    x_4d, filter=weights, output_shape=output_shape, strides=strides,
+                    padding=padding)
+                y = tf.nn.bias_add(y, biases)
 
     if activation is not None:
         y = activation(y)
