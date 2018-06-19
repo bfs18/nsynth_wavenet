@@ -193,7 +193,7 @@ def conv1d(x,
             g = tf.get_variable('W_g')
             b = tf.get_variable('biases')
             m_init, v_init = tf.nn.moments(y, [0, 1, 2])
-            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
+            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-10)
             with tf.control_dependencies(
                     [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
                 # y = tf.identity(y)
@@ -250,7 +250,7 @@ def trans_conv1d(x,
             g = tf.get_variable('kernel_g')
             b = tf.get_variable('bias')
             m_init, v_init = tf.nn.moments(y, [0, 1, 2])
-            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-8)
+            scale_init = WN_INIT_SCALE / tf.sqrt(v_init + 1e-10)
             with tf.control_dependencies(
                     [g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
                 # y = tf.identity(y)

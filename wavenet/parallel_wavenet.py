@@ -18,7 +18,7 @@ class ParallelWavenet(object):
         self.train_path = train_path
         self.use_mu_law = self.hparams.use_mu_law
         self.wave_length = self.hparams.wave_length
-        self.use_log_scale = getattr(self.hparams, 'use_log_scale', True)
+        self.use_log_scale = getattr(self.hparams, 'use_log_scale', False)
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
 
         if self.use_mu_law:
@@ -133,7 +133,7 @@ class ParallelWavenet(object):
         scale_params = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_scale'.format(iaf_name),
-            # kernel_initializer=tf.truncated_normal_initializer(mean=fk_mean, stddev=0.01),
+            # kernel_initializer=tf.truncated_normal_initializer(mean=-0.1, stddev=0.01),
             use_weight_norm=use_weight_norm, init=init)
 
         if use_log_scale:

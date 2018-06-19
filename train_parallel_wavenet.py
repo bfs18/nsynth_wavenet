@@ -8,6 +8,7 @@ from wavenet import parallel_wavenet, wavenet
 from auxilaries import utils
 from deployment import model_deploy
 from auxilaries import reader
+from train_wavenet import _init_logging
 
 slim = tf.contrib.slim
 
@@ -56,8 +57,14 @@ def train(args):
         def callback(session):
             tf.logging.info('Running data dependent initialization ' 
                             'for weight normalization')
-            session.run(init_ff_dict,
-                        feed_dict={_inputs_dict['mel']: mel_data})
+            init_out = session.run(
+                init_ff_dict, feed_dict={_inputs_dict['mel']: mel_data})
+            new_x = init_out['x']
+            mean = init_out['mean_tot']
+            scale = init_out['scale_tot']
+            _init_logging(new_x, 'new_x')
+            _init_logging(mean, 'mean')
+            _init_logging(scale, 'scale')
             tf.logging.info('Done data dependent initialization '
                             'for weight normalization')
         return callback

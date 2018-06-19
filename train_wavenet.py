@@ -1,4 +1,5 @@
 import json
+import numpy as np
 import tensorflow as tf
 import shutil
 import os
@@ -8,6 +9,14 @@ from deployment import model_deploy
 from auxilaries import reader
 
 slim = tf.contrib.slim
+
+
+def _init_logging(array, array_name):
+    tf.logging.info(
+        'initial {0}.m {1:.5f}, {0}.std {2:.5f}, '
+        '{0}.min {3:.5f}, {0}.max {4:.5f}'.format(
+            array_name, array.mean(), array.std(),
+            array.min(), array.max()))
 
 
 def train(args):
@@ -43,9 +52,14 @@ def train(args):
         def callback(session):
             tf.logging.info('Running data dependent initialization ' 
                             'for weight normalization')
-            session.run(init_ff_dict,
-                        feed_dict={_inputs_dict['wav']: wave_data,
-                                   _inputs_dict['mel']: mel_data})
+            init_out = session.run(
+                init_ff_dict, feed_dict={_inputs_dict['wav']: wave_data,
+                                         _inputs_dict['mel']: mel_data})
+            init_out_params = init_out['out_params']
+            _, log_scale, mean = np.split(init_out_params, 3, axis=2)
+            scale = np.exp(np.maximum(log_scale, -7.0))
+            _init_logging(mean, 'mean')
+            _init_logging(scale, 'scale')
             tf.logging.info('Done data dependent initialization '
                             'for weight normalization')
         return callback
