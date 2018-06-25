@@ -8,8 +8,8 @@ from auxilaries import utils, mel_extractor
 # log switch for debugging scale value range
 DETAIL_LOG = True
 MANUAL_FINAL_INIT = True
-CLIP = True
-LOG_SPEC = False
+CLIP = False
+LOG_SPEC = True
 
 
 class ParallelWavenet(object):
@@ -37,12 +37,12 @@ class ParallelWavenet(object):
             # when using st._clip_quant_scale and te.encode_signal,
             # There is no need for te.use_mu_law and st.use_mu_law to be consistent.
             assert teacher.use_mu_law == self.use_mu_law
-            _ = self.stft_mag_mean_std()  # calculated the cached value
 
             if LOG_SPEC:
-                self.stft_feat_fn = lambda x: tf.pow(tf.abs(x), 2.0)
-            else:
                 self.stft_feat_fn = lambda x: tf.log(tf.maximum(tf.abs(x), 1e-5))
+            else:
+                self.stft_feat_fn = lambda x: tf.pow(tf.abs(x), 2.0)
+            _ = self.stft_feat_mean_std()  # calculated the cached value
 
     def get_batch(self, batch_size):
         train_path = self.train_path
@@ -304,12 +304,12 @@ class ParallelWavenet(object):
         return trim_wav
 
     @lru_cache(maxsize=1)
-    def stft_mag_mean_std(self):
+    def stft_feat_mean_std(self):
         return mel_extractor.spec_mag_mean_std(
             self.train_path, feat_fn=self.stft_feat_fn)
 
     def power_loss(self, wav_dict):
-        mean, std = self.stft_mag_mean_std()
+        mean, std = self.stft_feat_mean_std()
         feat_fn = self.stft_feat_fn
 
         pred_wav = wav_dict['x']

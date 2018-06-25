@@ -137,12 +137,12 @@ def spec_mag_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
     ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
     feat = feat_fn(_tf_stft(ph))
 
-    tf.logging.info('Calculating mean and std for stft magnitude.')
+    tf.logging.info('Calculating mean and std for stft feat.')
     config = tf.ConfigProto(device_count={'GPU': 0})
     sess = tf.Session(config=config)
     feat_val = sess.run(feat, feed_dict={ph: input_vals})
     mean_val = np.mean(feat_val, axis=(0, 1))
     std_val = np.std(feat_val, axis=(0, 1))
-    tf.logging.info('Done calculating mean and std for stft magnitude.')
+    tf.logging.info('Done calculating mean and std for stft feat.')
 
     return mean_val, std_val

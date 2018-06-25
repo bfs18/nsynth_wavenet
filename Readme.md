@@ -22,7 +22,7 @@ The following examples are more of functional test than gaining good waves. The 
     * no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_mag.wav) [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav)
     
 The power loss defination is important, the failed case 1 use `pow(abs(stft(y)))` as mean square error input, 
-the failed case2 use `log(abs(stft(y)))`. The are both noisy, but the noises is of different type. I an still working on this.
+the failed case 2 use `log(abs(stft(y)))`. The are both noisy, but the noises are of different type. I am still working on this.
 
 
 Proper initial mean_tot and scale_tot values have positive impact on model convergence and numerical stability.
