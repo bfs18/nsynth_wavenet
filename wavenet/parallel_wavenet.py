@@ -1,12 +1,15 @@
 import tensorflow as tf
 import numpy as np
 
-from functools import partial
+from functools import partial, lru_cache
 from wavenet import wavenet, masked, loss_func
-from auxilaries import utils
+from auxilaries import utils, mel_extractor
 
 # log switch for debugging scale value range
 DETAIL_LOG = True
+MANUAL_FINAL_INIT = True
+CLIP = True
+LOG_SPEC = False
 
 
 class ParallelWavenet(object):
@@ -31,7 +34,15 @@ class ParallelWavenet(object):
         if teacher is not None:
             self.teacher = teacher
             assert teacher.loss_type == 'mol'
+            # when using st._clip_quant_scale and te.encode_signal,
+            # There is no need for te.use_mu_law and st.use_mu_law to be consistent.
             assert teacher.use_mu_law == self.use_mu_law
+            _ = self.stft_mag_mean_std()  # calculated the cached value
+
+            if LOG_SPEC:
+                self.stft_feat_fn = lambda x: tf.pow(tf.abs(x), 2.0)
+            else:
+                self.stft_feat_fn = lambda x: tf.log(tf.maximum(tf.abs(x), 1e-5))
 
     def get_batch(self, batch_size):
         train_path = self.train_path
@@ -56,6 +67,13 @@ class ParallelWavenet(object):
             normal_mean = -0.03 if self.use_log_scale else -0.01
         return normal_mean
 
+    @property
+    def final_bias(self):
+        if self.use_log_scale:
+            return -0.8
+        else:
+            return -0.3
+
     def _create_iaf(self, inputs, iaf_idx, init):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
@@ -71,6 +89,16 @@ class ParallelWavenet(object):
         # not double of that.
         # gate_width = 2 * width
         gate_width = width
+
+        if MANUAL_FINAL_INIT:
+            final_init = False
+            final_bias = self.final_bias
+            if init:
+                tf.logging.info('manually initialize the weights for ' 
+                                'the final layer of flow_{}.'.format(iaf_idx))
+        else:
+            final_init = init
+            final_bias = 0.0
 
         mel = inputs['mel']
         x = inputs['x']
@@ -128,13 +156,12 @@ class ParallelWavenet(object):
         mean = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_mean'.format(iaf_name),
-            # kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
-            use_weight_norm=use_weight_norm, init=init)
+            use_weight_norm=use_weight_norm, init=final_init)
         scale_params = masked.conv1d(
             l, num_filters=out_width // 2, filter_length=1,
             name='{}/out2_scale'.format(iaf_name),
-            # kernel_initializer=tf.truncated_normal_initializer(mean=-0.1, stddev=0.01),
-            use_weight_norm=use_weight_norm, init=init)
+            use_weight_norm=use_weight_norm, init=final_init,
+            biases_initializer=tf.constant_initializer(final_bias))
 
         if use_log_scale:
             log_scale = tf.clip_by_value(scale_params, -9.0, 7.0)
@@ -234,13 +261,20 @@ class ParallelWavenet(object):
         # (x_i|x_<i), x given x_previous from student
         x_xp = rl * scale + mean
 
-        # clip x and x_xp to real audio range [-1.0, 1.0)
-        # if use_mu_law = True,
-        # take iaf output as mu_law encoded real audio signal.
-        # x_scaled = self._clip_quant_scale(x, quant_chann, use_mu_law)
-        # x_xp_scaled = self._clip_quant_scale(x_xp, quant_chann, use_mu_law)
+        if CLIP:
+            # clip x and x_xp to real audio range [-1.0, 1.0)
+            # if use_mu_law = True,
+            # take iaf output as mu_law encoded real audio signal.
+            x_cqs = self._clip_quant_scale(x, quant_chann, use_mu_law)
+            x_xp_cqs = self._clip_quant_scale(x_xp, quant_chann, use_mu_law)
+            x_scaled = teacher.encode_signal({'wav': x_cqs})['wav_scaled']
+            x_xp_scaled = teacher.encode_signal({'wav': x_xp_cqs})['wav_scaled']
+        else:
+            # remove clip_quant_scale
+            x_scaled = x
+            x_xp_scaled = x_xp
 
-        wn_ff_dict = teacher.feed_forward({'wav_scaled': x,
+        wn_ff_dict = teacher.feed_forward({'wav_scaled': x_scaled,
                                            'mel': mel})
         te_mol = wn_ff_dict['out_params']
         te_mol = utils.tf_repeat(te_mol, [num_samples, 1, 1])
@@ -248,7 +282,7 @@ class ParallelWavenet(object):
         # teacher always use log_scale, so use_log_scale of
         # loss_func.mol_log_probs is set to default value True.
         log_te_probs = loss_func.mol_log_probs(
-            te_mol, x_xp, quant_chann)
+            te_mol, x_xp_scaled, quant_chann)
         # H_Ps_Pt for batch * length
         H_Ps_Pt_bl = -tf.reduce_mean(
             tf.reshape(log_te_probs, [batch_size, num_samples, length]),
@@ -269,11 +303,15 @@ class ParallelWavenet(object):
         trim_wav = tf.slice(x, [0, left_tl], [-1, x_len - trim_len])
         return trim_wav
 
-    def power_loss(self,
-                   wav_dict,
-                   frame_length=800,
-                   frame_shift=200,
-                   fft_length=1024):
+    @lru_cache(maxsize=1)
+    def stft_mag_mean_std(self):
+        return mel_extractor.spec_mag_mean_std(
+            self.train_path, feat_fn=self.stft_feat_fn)
+
+    def power_loss(self, wav_dict):
+        mean, std = self.stft_mag_mean_std()
+        feat_fn = self.stft_feat_fn
+
         pred_wav = wav_dict['x']
         orig_wav = wav_dict['wav']
         pred_len = pred_wav.get_shape().as_list()[1]
@@ -284,17 +322,17 @@ class ParallelWavenet(object):
         elif pred_len < orig_len:
             orig_wav = self._trim(orig_wav, orig_len - pred_len)
 
-        _stft = partial(tf.contrib.signal.stft,
-                        frame_length=frame_length,
-                        frame_step=frame_shift,
-                        fft_length=fft_length,
-                        pad_end=True)
-        orig_stft = _stft(orig_wav)
-        pred_stft = _stft(pred_wav)
-        orig_mag_pow = tf.pow(tf.abs(orig_stft), 2.0)
-        pred_mag_pow = tf.pow(tf.abs(pred_stft), 2.0)
+        orig_stft = mel_extractor._tf_stft(orig_wav)
+        pred_stft = mel_extractor._tf_stft(pred_wav)
+
+        def _norm(feat):
+            return (feat - tf.cast(mean, tf.float32)) / tf.cast(std, tf.float32)
+
+        orig_feat = _norm(feat_fn(orig_stft))
+        pred_feat = _norm(feat_fn(pred_stft))
+
         power_loss = 0.5 * tf.reduce_mean(
-            tf.squared_difference(orig_mag_pow, pred_mag_pow))
+            tf.squared_difference(orig_feat, pred_feat))
         return {'power_loss': power_loss}
 
     def calculate_loss(self, ff_dict):

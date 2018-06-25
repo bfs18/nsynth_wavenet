@@ -110,6 +110,12 @@ def batch_to_time(x, block_size):
     return y
 
 
+def l2_norm(tensor, axis, keep_dims=True):
+    s = tf.reduce_sum(tf.pow(tensor, 2.0),
+                      axis=axis, keep_dims=keep_dims)
+    return tf.sqrt(s)
+
+
 def get_kernel(kernel_shape, initializer, name,
                use_weight_norm=False, deconv=False):
     if use_weight_norm:
@@ -126,8 +132,9 @@ def get_kernel(kernel_shape, initializer, name,
 
         V = tf.get_variable(
             '{}_V'.format(name), shape=kernel_shape, initializer=initializer)
-        g = tf.get_variable('{}_g'.format(name), shape=[out_dim],
-                            initializer=tf.constant_initializer(1.0))
+        g = tf.get_variable(
+            '{}_g'.format(name),
+            initializer=l2_norm(V.initialized_value(), axis=norm_axis, keep_dims=False))
         V_norm = tf.nn.l2_normalize(V, axis=norm_axis)
         weights = V_norm * tf.reshape(g, shape=g_bc_shape)
     else:

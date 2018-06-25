@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from functools import reduce
+from wavenet.masked import conv1d
 
 
 def test_moments():
@@ -106,7 +107,43 @@ def test_parallel_wavenet_scale():
     print('INFO:tensorflow:initial scale.m 0.38296, scale.std 0.61160, scale.min 0.00130, scale.max 9.61347')
 
 
+def test_normal_scale():
+    batch_size = 8
+    filter_len = 3
+    in_channels = 64
+    out_channels = 10
+    seq_len = 7680
+    num_iafs = 4
+
+    ph = tf.placeholder(dtype=tf.float32, shape=(batch_size, seq_len, in_channels))
+    mean = conv1d(tf.nn.relu(ph),
+                  num_filters=out_channels,
+                  filter_length=filter_len,
+                  name='mean_conv',
+                  # kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.05),
+                  biases_initializer=tf.constant_initializer(0.0),
+                  use_weight_norm=True)
+    scale_param = conv1d(tf.nn.relu(ph),
+                         num_filters=out_channels,
+                         filter_length=filter_len,
+                         name='scale_conv',
+                         # kernel_initializer=tf.random_normal_initializer(mean=0.0, stddev=0.05),
+                         biases_initializer=tf.constant_initializer(-0.8),
+                         use_weight_norm=True)
+
+    mean_tot = 0.
+    scale_tot = 1.
+    for i in range(num_iafs):
+        data = np.random.normal(0., 1., size=(batch_size, seq_len, in_channels))
+        sess = tf.Session()
+        sess.run(tf.global_variables_initializer())
+        mean_val, scale_param_val = sess.run([mean, scale_param], feed_dict={ph: data})
+        scale_val = get_scale(scale_param_val, use_log_scale=True)
+        mean_tot = mean_val + scale_val * mean_tot
+        scale_tot *= scale_val
+    init_logging(mean_tot, 'mean')
+    init_logging(scale_tot, 'scale')
+
+
 if __name__ == '__main__':
-    test_moments()
-    test_wavenet_scale()
-    test_parallel_wavenet_scale()
+    test_normal_scale()

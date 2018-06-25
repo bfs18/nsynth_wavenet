@@ -4,6 +4,7 @@ from auxilaries import reader, utils
 from wavenet import masked, loss_func
 
 
+DOUBLE_GATE_WIDTH = False  # support for old models.
 DEFAULT_LR_SCHEDULE = {
     0: 2e-4,
     90000: 4e-4 / 3,
@@ -99,7 +100,7 @@ class Wavenet(object):
                                init=init)
         return {'encoding': mel_en}
 
-    def encode_signal(self, inputs):
+    def encode_signal(self, inputs, add_noise=False):
         ###
         # Encode the source with 8-bit Mu-Law or just use 16-bit signal.
         ###
@@ -117,6 +118,10 @@ class Wavenet(object):
             x_scaled = x
             real_targets = x
             cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
+
+        if add_noise:
+            # only used when the wavenet is trained as a teacher.
+            x_scaled += tf.random_normal(shape=x_scaled.get_shape(), mean=0.0, stddev=0.1)
 
         return {'wav_scaled': x_scaled,
                 'real_targets': real_targets,
@@ -142,8 +147,7 @@ class Wavenet(object):
         out_width = self.out_width
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
-        # gate_width = 2 * width
-        gate_width = width
+        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -281,8 +285,7 @@ class Fastgen(object):
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
-        # gate_width = 2 * width
-        gate_width = width
+        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]

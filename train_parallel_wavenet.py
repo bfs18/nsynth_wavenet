@@ -5,12 +5,13 @@ import shutil
 import os
 from argparse import ArgumentParser, Namespace
 from wavenet import parallel_wavenet, wavenet
-from auxilaries import utils
+from auxilaries import utils, config_str
 from deployment import model_deploy
 from auxilaries import reader
 from train_wavenet import _init_logging
 
 slim = tf.contrib.slim
+EXP_TAG = ''
 
 
 def train(args):
@@ -82,7 +83,11 @@ def train(args):
         if 'power_loss' in loss_dict:
             tf.summary.scalar('power_loss', loss_dict['power_loss'])
 
-    logdir = args.logdir
+    if args.log_root:
+        logdir_name = config_str.get_config_time_str(st_hparams, 'parallel_wavenet', EXP_TAG)
+        logdir = os.path.join(args.log_root, logdir_name)
+    else:
+        logdir = args.logdir
     tf.logging.info('Saving to {}'.format(logdir))
 
     os.makedirs(logdir, exist_ok=True)
@@ -181,6 +186,8 @@ if __name__ == '__main__':
     parser.add_argument("--teacher_dir", required=True,
                         help="The path saves the teacher config and json.")
     parser.add_argument("--logdir", default="/tmp/nsynth",
+                        help="The log directory for this experiment.")
+    parser.add_argument("--log_root", default="",
                         help="The log directory for this experiment.")
     parser.add_argument("--total_batch_size", default=4, type=int,
                         help="Batch size spread across all sync replicas."

@@ -6,9 +6,10 @@ import os
 from argparse import ArgumentParser, Namespace
 from wavenet import wavenet
 from deployment import model_deploy
-from auxilaries import reader
+from auxilaries import reader, config_str
 
 slim = tf.contrib.slim
+EXP_TAG = ''
 
 
 def _init_logging(array, array_name):
@@ -32,6 +33,10 @@ def train(args):
     hparams = Namespace(**configs)
 
     wn = wavenet.Wavenet(hparams, os.path.abspath(os.path.expanduser(args.train_path)))
+    # At training, wavenet never see the output values of parallel wavenet
+    # if clip_quant_scale is not used in parallel wavenet.
+    # Add noise to wavenet input to remedy this.
+    add_noise = getattr(hparams, 'add_noise', False)
 
     def _data_dep_init():
         # slim.learning.train runs init_fn earlier than start_queue_runner
@@ -65,7 +70,7 @@ def train(args):
         return callback
 
     def _model_fn(_inputs_dict):
-        encode_dict = wn.encode_signal(_inputs_dict)
+        encode_dict = wn.encode_signal(_inputs_dict, add_noise)
         _inputs_dict.update(encode_dict)
         ff_dict = wn.feed_forward(_inputs_dict)
         ff_dict.update(encode_dict)
@@ -73,7 +78,11 @@ def train(args):
         loss = loss_dict['loss']
         tf.add_to_collection(tf.GraphKeys.LOSSES, loss)
 
-    logdir = args.logdir
+    if args.log_root:
+        logdir_name = config_str.get_config_time_str(hparams, 'wavenet', EXP_TAG)
+        logdir = os.path.join(args.log_root, logdir_name)
+    else:
+        logdir = args.logdir
     tf.logging.info('Saving to {}'.format(logdir))
 
     os.makedirs(logdir, exist_ok=True)
@@ -154,6 +163,8 @@ if __name__ == '__main__':
     parser.add_argument("--train_path", required=True,
                         help="The path to the train tfrecord.")
     parser.add_argument("--logdir", default="/tmp/nsynth",
+                        help="The log directory for this experiment.")
+    parser.add_argument("--log_root", default="",
                         help="The log directory for this experiment.")
     parser.add_argument("--total_batch_size", default=4, type=int,
                         help="Batch size spread across all sync replicas."

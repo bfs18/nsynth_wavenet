@@ -3,6 +3,7 @@ import librosa.filters
 import numpy as np
 import tensorflow as tf
 import math
+from auxilaries import reader, utils
 
 from scipy import signal
 
@@ -17,7 +18,9 @@ mel_params = tf.contrib.training.HParams(
     frame_shift_ms=12.5,
     frame_length_ms=50,
     preemphasis=0.97,
-    min_level_db=-100,
+    mel_min_level_db=-100,
+    spec_min_level_db=-140,
+    spec_ref_level_db=40,
     mel_fmin=125,
     mel_fmax=7600)
 
@@ -27,7 +30,7 @@ FRAME_SHIFT = int(mel_params.frame_shift_ms * mel_params.sample_rate / 1000.)
 def melspectrogram(y):
     D = _stft(y, mel_params)
     S = _amp_to_db(_linear_to_mel(np.abs(D), mel_params))
-    NS = _normalize(S, mel_params)
+    NS = _normalize(S, mel_params.mel_min_level_db)
     return NS.T.astype(np.float32)
 
 
@@ -86,5 +89,60 @@ def _preemphasis(x, mel_params):
     return signal.lfilter([1, -mel_params.preemphasis], [1], x)
 
 
-def _normalize(S, mel_params):
-    return np.clip((S - mel_params.min_level_db) / -mel_params.min_level_db, 0, 1)
+def _normalize(S, min_level_db):
+    return np.clip((S - min_level_db) / -min_level_db, 0, 1)
+
+
+######################
+# extend for power loss
+######################
+def log10(x):
+    numerator = tf.log(x)
+    denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
+    return numerator / denominator
+
+
+def _tf_amp_to_db(x):
+    return 20 * log10(tf.maximum(1e-5, x))
+
+
+def _tf_normalize(S, min_level_db):
+    min_level_db = tf.cast(min_level_db, np.float32)
+    return tf.clip_by_value((S - min_level_db) / -min_level_db, 0., 1.)
+
+
+def _tf_stft(y):
+    frame_shift = int(mel_params.frame_shift_ms * mel_params.sample_rate / 1000)
+    frame_length = int(mel_params.frame_length_ms * mel_params.sample_rate / 1000)
+    fft_length = int(2 * (mel_params.num_freq - 1))
+    tf_stft = tf.contrib.signal.stft(
+        y,
+        frame_length=frame_length,
+        frame_step=frame_shift,
+        fft_length=fft_length,
+        pad_end=True)
+    return tf_stft
+
+
+def tf_spectrogram(y):
+    D = _tf_stft(y)
+    S = _tf_amp_to_db(tf.abs(D)) - mel_params.spec_ref_level_db
+    NS = _tf_normalize(S, mel_params.spec_min_level_db)
+    return NS
+
+
+def spec_mag_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
+    input_vals = reader.get_init_batch(
+        train_path, batch_size=4096, seq_len=7680, first_n=10000)['wav']
+    ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
+    feat = feat_fn(_tf_stft(ph))
+
+    tf.logging.info('Calculating mean and std for stft magnitude.')
+    config = tf.ConfigProto(device_count={'GPU': 0})
+    sess = tf.Session(config=config)
+    feat_val = sess.run(feat, feed_dict={ph: input_vals})
+    mean_val = np.mean(feat_val, axis=(0, 1))
+    std_val = np.std(feat_val, axis=(0, 1))
+    tf.logging.info('Done calculating mean and std for stft magnitude.')
+
+    return mean_val, std_val
