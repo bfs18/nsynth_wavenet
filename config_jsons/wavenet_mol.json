@@ -1,5 +1,7 @@
 {
-  "num_iters": 200000,
+  "lr_schedule": [[0, 1e-4], [90000, 6e-5], [120000, 4e-5],
+                  [150000, 2e-5], [180000, 6e-6], [210000, 2e-6]],
+  "num_iters": 400000,
   "wave_length": 7680,
   "num_stages": 10,
   "num_layers": 30,
@@ -10,5 +12,7 @@
   "deconv_config": [[40, 10], [80, 20]],
   "use_mu_law": false,
   "loss_type": "mol",
-  "mol_mix": 10
+  "mol_mix": 10,
+  "use_weight_norm": true,
+  "add_noise": true
 }

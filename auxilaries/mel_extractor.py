@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 import math
 from auxilaries import reader, utils
+from functools import lru_cache
 
 from scipy import signal
 
@@ -24,6 +25,7 @@ mel_params = tf.contrib.training.HParams(
     mel_fmin=125,
     mel_fmax=7600)
 
+PRIORITY_FREQ = int(3000 / (mel_params.sample_rate * 0.5) * mel_params.num_freq)
 FRAME_SHIFT = int(mel_params.frame_shift_ms * mel_params.sample_rate / 1000.)
 
 
@@ -131,18 +133,40 @@ def tf_spectrogram(y):
     return NS
 
 
-def spec_mag_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
-    input_vals = reader.get_init_batch(
-        train_path, batch_size=4096, seq_len=7680, first_n=10000)['wav']
-    ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
-    feat = feat_fn(_tf_stft(ph))
+def spec_feat_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
+    local_graph = tf.Graph()
+    with local_graph.as_default():
+        input_vals = reader.get_init_batch(
+            train_path, batch_size=4096, seq_len=7680, first_n=10000)['wav']
+        ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
+        feat = feat_fn(_tf_stft(ph))
 
     tf.logging.info('Calculating mean and std for stft feat.')
     config = tf.ConfigProto(device_count={'GPU': 0})
-    sess = tf.Session(config=config)
+    sess = tf.Session(config=config, graph=local_graph)
     feat_val = sess.run(feat, feed_dict={ph: input_vals})
     mean_val = np.mean(feat_val, axis=(0, 1))
     std_val = np.std(feat_val, axis=(0, 1))
     tf.logging.info('Done calculating mean and std for stft feat.')
 
     return mean_val, std_val
+
+
+@lru_cache(maxsize=1)
+def _tf_build_mel_basis(graph):
+    # graph is only used to index cache
+    tf.logging.info('Initiate tensorflow mel weight matrix for {}'.format(graph))
+    return tf.contrib.signal.linear_to_mel_weight_matrix(
+        num_mel_bins=mel_params.num_mel,
+        num_spectrogram_bins=mel_params.num_freq,
+        sample_rate=mel_params.sample_rate,
+        lower_edge_hertz=mel_params.mel_fmin,
+        upper_edge_hertz=mel_params.mel_fmax)
+
+
+def tf_melspectrogram2(spec):
+    graph = tf.get_default_graph()
+    mel_basis = _tf_build_mel_basis(graph)
+    mel_spec = tf.tensordot(spec, mel_basis, 1)
+    mel_spec.set_shape(spec.shape[:-1].concatenate(mel_basis.shape[-1:]))
+    return mel_spec

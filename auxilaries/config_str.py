@@ -33,26 +33,40 @@ def get_config_srt(hparams, model, tag=''):
     else:
         weight_norm_tag = 'n_WN'
 
-    if getattr(hparams, 'use_log_scale', False):
-        log_scale_tag = 'LOGS'
-    else:
-        log_scale_tag = 'n_LOGS'
-
     loss_type = getattr(hparams, 'loss_type', '').upper()
 
     cstr = '-'.join([prefix + model_str, mu_law_tag, weight_norm_tag])
 
     if model == 'parallel_wavenet':
-        cstr += '-{}'.format(log_scale_tag)
+        if parallel_wavenet.USE_LOG_SCALE:
+            cstr += '-LOGS'
+        else:
+            cstr += '-n_LOGS'
+
         if parallel_wavenet.CLIP:
             cstr += '-CLIP'
         else:
             cstr += '-n_CLIP'
 
         if parallel_wavenet.LOG_SPEC:
-            cstr += '-LABS'
+            cstr += '-NLABS' if parallel_wavenet.NORM_FEAT else '-LABS'
         else:
-            cstr += '-NMAG'
+            cstr += '-NMAG' if parallel_wavenet.NORM_FEAT else '-MAG'
+
+        if parallel_wavenet.USE_MEL:
+            cstr += '-MEL'
+        else:
+            cstr += '-n_MEL'
+
+        if parallel_wavenet.USE_L1_LOSS:
+            cstr += '-L1'
+        else:
+            cstr += '-L2'
+
+        if parallel_wavenet.USE_PRIORITY_FREQ:
+            cstr += '-PFS'
+        else:
+            cstr += '-n_PFS'
 
     if model == 'wavenet' and getattr(hparams, 'add_noise', False):
         cstr += '-NOISE'

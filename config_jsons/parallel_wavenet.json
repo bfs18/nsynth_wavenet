@@ -10,7 +10,7 @@
   "deconv_width": 256,
   "deconv_config": [[40, 10], [80, 20]],
   "use_mu_law": false,
-  "use_log_scale": false,
+  "use_weight_norm": true,
   "num_samples": 100,
   "power_loss_factor": 1.0
 }

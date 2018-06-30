@@ -19,10 +19,13 @@ The following examples are more of functional test than gaining good waves. The 
     * [OK] no_mu_law + mol [LJ001-0001](tests/pred_data-no_mu_law+mol/gen_LJ001-0001.wav) [LJ001-0002](tests/pred_data-no_mu_law+mol/gen_LJ001-0002.wav)
 * tune parallel wavenet 
     * use_mu_law
-    * no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_mag.wav) [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav)
+    * no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_pow.wav)
+                [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav) 
+                [A better case](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_abs.wav)
     
 The power loss defination is important, the failed case 1 use `pow(abs(stft(y)))` as mean square error input, 
-the failed case 2 use `log(abs(stft(y)))`. The are both noisy, but the noises are of different type. I am still working on this.
+the failed case 2 use `log(abs(stft(y)))`. The are both noisy, but the noises are of different type.
+A better case uses `abs(stft(y))`, it is much clearer than the previous 2 cases. Probably this is the right choice.
 
 
 Proper initial mean_tot and scale_tot values have positive impact on model convergence and numerical stability.
