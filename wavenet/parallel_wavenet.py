@@ -15,8 +15,7 @@ NORM_FEAT = False
 ############################################
 USE_PRIORITY_FREQ = False
 USE_L1_LOSS = False
-LOG_SPEC = False
-SPEC_ENHANCE_FACTOR = 1  # 0 for log; 1 for abs; 2 for pow
+SPEC_ENHANCE_FACTOR = 3  # 0 for log; 1 for abs; 2 for pow; 3 for combine
 USE_MEL = False
 ############################################
 USE_PRIORITY_FREQ = False if USE_MEL else USE_PRIORITY_FREQ
@@ -35,6 +34,13 @@ class PWNHelper(object):
             y = tf.log(tf.maximum(y, 1e-5))
         elif SPEC_ENHANCE_FACTOR == 2:
             y = tf.pow(y, 2.0)
+        elif SPEC_ENHANCE_FACTOR == 3:
+            rw_fn = lambda w: w if USE_L1_LOSS else tf.sqrt(w)
+            y0 = rw_fn(0.4) * y
+            y1 = rw_fn(0.2) * tf.log(tf.maximum(y, 1e-5))
+            y2 = rw_fn(0.2) * tf.pow(y, 1.2)
+            y3 = rw_fn(0.2) * tf.pow(y, 1.5)
+            y = tf.concat([y0, y1, y2, y3], axis=0)
 
         return y
 

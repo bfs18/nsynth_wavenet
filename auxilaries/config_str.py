@@ -48,10 +48,16 @@ def get_config_srt(hparams, model, tag=''):
         else:
             cstr += '-n_CLIP'
 
-        if parallel_wavenet.LOG_SPEC:
+        if parallel_wavenet.SPEC_ENHANCE_FACTOR == 0:
             cstr += '-NLABS' if parallel_wavenet.NORM_FEAT else '-LABS'
+        elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 1:
+            cstr += '-NABS' if parallel_wavenet.NORM_FEAT else '-ABS'
+        elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 2:
+            cstr += '-NPOW' if parallel_wavenet.NORM_FEAT else '-POW'
+        elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 3:
+            cstr += '-NCOM' if parallel_wavenet.NORM_FEAT else '-COM'
         else:
-            cstr += '-NMAG' if parallel_wavenet.NORM_FEAT else '-MAG'
+            raise ValueError("SPEC_ENHANCE_FACTOR Value Error.")
 
         if parallel_wavenet.USE_MEL:
             cstr += '-MEL'
