@@ -2,7 +2,8 @@ Implement parallel wavenet based on nsynth.
 
 To make the code and configuration as simple as possible, most of the extensible properties are not extended and are set to default values.
 
-=====================================================================================  
+***
+
 How to use the code:  
 
 Suppose a directory named `WAVE_DIR` contains all the wave files that are used to train a wavenet model.
@@ -30,7 +31,8 @@ The arguments are quite self-evident.
 
 4. Generate waves form a trained wavenet. Suppose a trained wavenet is saved in WN_LOGDIR.
     ```
-    python3 eavl_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data --save_path tests/pred_data --gpu_id 0
+    python3 eavl_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data \
+        --save_path tests/pred_data --gpu_id 0
     ```
 5. Train a parallel wavenet.
     ```
@@ -63,8 +65,10 @@ The arguments are quite self-evident.
     python3 run_all_eval.py -c all_eval.json -w tests/test_data -t ~/all_test_log
     ```
 
+***
 
-=====================================================================================  
+Code status
+
 * [OK] wavenet 
 * [OK] fastgen for wavenet  
 * [OK] parallel wavenet  
