@@ -14,5 +14,5 @@
   "loss_type": "mol",
   "mol_mix": 10,
   "use_weight_norm": true,
-  "add_noise": true
+  "add_noise": false
 }

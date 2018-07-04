@@ -2,9 +2,69 @@ Implement parallel wavenet based on nsynth.
 
 To make the code and configuration as simple as possible, most of the extensible properties are not extended and are set to default values.
 
-Librosa downsample result may be not in [-1, 1), so use tool/sox_downsample.py to downsample all waves first.
+=====================================================================================  
+How to use the code:  
+
+Suppose a directory named `WAVE_DIR` contains all the wave files that are used to train a wavenet model.
+1.  Downsample the wave files if the sampling rate is not 16k Hz
+ (only 16k Hz wave files are supported for the time being).   
+Librosa downsample result may be not in [-1, 1), so use `tool/sox_downsample.py` to downsample all waves first.
+The arguments are quite self-evident.
+
+2.  Build the tf_record data.
+    ```
+    python3 build_dataset.py --wave_dir WAVE_DIR --save_path TFR_PATH
+    ```
+3.  Train a teacher wavenet. `config_jsons/wavenet_mol.json` is a proper configuration file for 
+    a teacher wavenet.
+    ```
+    python3 train_wavenet.py --config config_jsons/wavenet_mol.json --train_path TFR_PATH \
+        --log_root WN_LOG_ROOT --total_batch_size 28 --gpu_id 0,1,2,3
+    ```
+    The training script supports multiple GPUs. Just specify the gpu ids with `--gpu_id`
+    to use multiple GPUs.  
+    Either `--logdir` or `--log_root` can be used to specify the directory that saves the training log and model files. 
+    If `--log_root` is assigned, it will make a subdirectory named by the abbreviation of 
+    the running configuration in `LOG_ROOT`. `--logdir` is used to specify an existing log directory so an
+    interrupted running can be continued from the saved models.
+
+4. Generate waves form a trained wavenet. Suppose a trained wavenet is saved in WN_LOGDIR.
+    ```
+    python3 eavl_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data --save_path tests/pred_data --gpu_id 0
+    ```
+5. Train a parallel wavenet.
+    ```
+    python3 --config config_jsons/parallel_wavenet.json --train_paht TFR_PATH \
+        --teacher_dir WN_LOGDIR --log_root PWN_LOG_ROOT --total_batch_size 28 \
+        --gpu_id 0,1,2,3
+    ```
+6.  Generate waves form a trained parallel wavenet. 
+    Suppose a trained parallel wavenet is saved in PWN_LOGDIR.
+    ```
+    python3 eavl_parallel_wavenet.py --ckpt_dir PWN_LOGDIR --source_path tests/test_data \
+        --save_path tests/pred_data --gpu_id 0
+    ```
+7. If multiple experiments is run on multiple servers, you may want to gather all the experiment
+    logs and generated waves from each host. You can use `run_all_eval.py` script. A configuration file
+    is needed to specify the hosts, users, passwords, exp_dirs and eval_scripts.
+    For example:
+    ```
+    all_eval.json
+    {
+        "hosts": ["", "127.0.0.233"]
+        "users": ["", "asdf"]
+        "passwords": ["", "xxxx"]
+        "exp_dirs": ["~/exp/logdir1", "/data/logdir2"]
+        "eval_scripts": ["eval_parallel_wavenet.py", "eval_wavenet.py"]
+    }
+    ```
+    If it is a local host, you can set hosts, users, passwords to empty strings.
+    ```
+    python3 run_all_eval.py -c all_eval.json -w tests/test_data -t ~/all_test_log
+    ```
 
 
+=====================================================================================  
 * [OK] wavenet 
 * [OK] fastgen for wavenet  
 * [OK] parallel wavenet  
