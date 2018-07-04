@@ -5,19 +5,26 @@ from functools import partial, lru_cache
 from wavenet import wavenet, masked, loss_func
 from auxilaries import utils, mel_extractor
 
+# ###########################################
+# better not change
+# ###########################################
 # log switch for debugging scale value range
 DETAIL_LOG = True
 MANUAL_FINAL_INIT = True
 USE_LOG_SCALE = False
 CLIP = False
-NORM_FEAT = False
 # http://www.icsi.berkeley.edu/ftp/pub/speech/papers/gelbart-ms/mask/spectralnorm.html
-############################################
+NORM_FEAT = False
+# ###########################################
+# modify to fine-tune
+# ###########################################
 USE_PRIORITY_FREQ = False
 USE_L1_LOSS = False
-SPEC_ENHANCE_FACTOR = 3  # 0 for log; 1 for abs; 2 for pow; 3 for combine
+SPEC_ENHANCE_FACTOR = 1  # 0 for log; 1 for abs; 2 for pow; 3 for combine
 USE_MEL = False
-############################################
+# ###########################################
+# modify mutex options
+# ###########################################
 USE_PRIORITY_FREQ = False if USE_MEL else USE_PRIORITY_FREQ
 
 

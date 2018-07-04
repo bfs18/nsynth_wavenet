@@ -276,6 +276,40 @@ def trans_conv1d(x,
     return y
 
 
+def resize_conv1d(x,
+                  num_filters,
+                  filter_length,
+                  stride,
+                  name,
+                  activation=tf.nn.tanh,
+                  kernel_initializer=tf.random_normal_initializer(0, 0.05),
+                  bias_initializer=tf.constant_initializer(0.0),
+                  use_weight_norm=False,
+                  init=False):
+    x_4d = tf.expand_dims(x, axis=1)
+    in_length = x_4d.get_shape().as_list()[2]
+    ups_x_4d = tf.image.resize_nearest_neighbor(
+        x_4d, [1, in_length * stride], name='{}/resize'.format(name))
+
+    x = tf.squeeze(ups_x_4d, axis=1)
+    y = conv1d(x,
+               num_filters=num_filters,
+               filter_length=filter_length,
+               name=name,
+               causal=False,
+               dilation=1,
+               kernel_initializer=kernel_initializer,
+               biases_initializer=bias_initializer,
+               use_weight_norm=use_weight_norm,
+               init=init)
+    if activation:
+        y = activation(y)
+    return y
+
+
+# ####################################################################
+# deprecated functions.
+# ####################################################################
 def _trans_conv1d(x,
                   num_filters,
                   filter_length,

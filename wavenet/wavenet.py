@@ -13,6 +13,31 @@ DEFAULT_LR_SCHEDULE = {
     180000: 2e-5,
     210000: 6e-6,
     240000: 2e-6}
+################################################################
+USE_RESIZE_CONV = False
+# use resize_conv1d instead of trans_conv1d, also change parallel wavenet.
+
+
+class WNHelper(object):
+    """wavenet helper"""
+
+    @staticmethod
+    def upsample_conv1d(
+            x, num_filters, filter_length, stride, name_patt,
+            use_weight_norm=False, init=False):
+        conv_args = {"x": x,
+                     "num_filters": num_filters,
+                     "filter_length": filter_length,
+                     "stride": stride,
+                     "use_weight_norm": use_weight_norm,
+                     "init": init}
+        if USE_RESIZE_CONV:
+            y = masked.resize_conv1d(
+                **conv_args, name=name_patt.format("resize_conv"))
+        else:
+            y = masked.trans_conv1d(
+                **conv_args, name=name_patt.format("trans_conv"))
+        return y
 
 
 def _deconv_stack(inputs, width, config, name='',
@@ -23,15 +48,15 @@ def _deconv_stack(inputs, width, config, name='',
     for i in range(len(config)):
         fl, s = config[i]
         if name:
-            tc_name = '{}/trans_conv_{:d}'.format(name, i + 1)
+            tc_name = '{}/{{}}_{:d}'.format(name, i + 1)
         else:
-            tc_name = 'trans_conv_{:d}'.format(i + 1)
-        mel_en = masked.trans_conv1d(
+            tc_name = '{{}}_{:d}'.format(i + 1)
+        mel_en = WNHelper.upsample_conv1d(
             mel_en,
             num_filters=width,
             filter_length=fl,
             stride=s,
-            name=tc_name,
+            name_patt=tc_name,
             use_weight_norm=use_weight_norm,
             init=init)
     mel_en.set_shape([b, l * frame_shift, width])

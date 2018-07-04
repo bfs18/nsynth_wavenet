@@ -37,6 +37,11 @@ def get_config_srt(hparams, model, tag=''):
 
     cstr = '-'.join([prefix + model_str, mu_law_tag, weight_norm_tag])
 
+    if wavenet.USE_RESIZE_CONV:
+        cstr += '-RS'
+    else:
+        cstr += '-TS'
+
     if model == 'parallel_wavenet':
         if parallel_wavenet.USE_LOG_SCALE:
             cstr += '-LOGS'
