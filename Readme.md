@@ -64,10 +64,21 @@ The arguments are quite self-evident.
     ```
     python3 run_all_eval.py -c all_eval.json -w tests/test_data -t ~/all_test_log
     ```
+    
+***
+
+Pre-trained models:
+
+wavenet model: [ns_wn-eval.tar.gz](https://drive.google.com/open?id=1P-ICvPuakLIliXlD6y7IL2lykA5Gys4T)  
+Please set DOUBLE_GATE_WIDTH=True in wavenet/wavenet.py when using ns_wn-eval.  
+parallel wavenet model: [ns_pwn-eval.tar.gz](https://drive.google.com/open?id=13rHT6zr2sXeedmjUOpp6IVQdT30cy66_)  
+The pre-trained models are trained on [LJSpeech](https://keithito.com/LJ-Speech-Dataset/) dataset. 
+The package contains the checkpoint and the confing json file.
+
 
 ***
 
-Code status
+Code status:
 
 * [OK] wavenet 
 * [OK] fastgen for wavenet  
