@@ -3,6 +3,7 @@ import json
 import subprocess
 from argparse import Namespace
 import time
+from auxilaries import reader
 
 
 def get_config_srt(hparams, model, tag=''):
@@ -37,6 +38,9 @@ def get_config_srt(hparams, model, tag=''):
 
     cstr = '-'.join([prefix + model_str, mu_law_tag, weight_norm_tag])
 
+    if reader.USE_NEW_MEL_EXTRACTOR:
+        cstr += '-NM'
+
     if wavenet.USE_RESIZE_CONV:
         cstr += '-RS'
     else:
@@ -61,8 +65,15 @@ def get_config_srt(hparams, model, tag=''):
             cstr += '-NPOW' if parallel_wavenet.NORM_FEAT else '-POW'
         elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 3:
             cstr += '-NCOM' if parallel_wavenet.NORM_FEAT else '-COM'
+        elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 3:
+            cstr += '-NDBN' if parallel_wavenet.NORM_FEAT else '-DBN'
         else:
             raise ValueError("SPEC_ENHANCE_FACTOR Value Error.")
+
+        if parallel_wavenet.AVG_OVER_TIME:
+            cstr += '-AOT'
+        else:
+            cstr += '-n_AOT'
 
         if parallel_wavenet.USE_MEL:
             cstr += '-MEL'

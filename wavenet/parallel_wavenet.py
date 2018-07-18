@@ -3,7 +3,7 @@ import numpy as np
 
 from functools import partial, lru_cache
 from wavenet import wavenet, masked, loss_func
-from auxilaries import utils, mel_extractor
+from auxilaries import utils, mel_extractor, reader
 
 # ###########################################
 # better not change
@@ -20,8 +20,10 @@ NORM_FEAT = False
 # ###########################################
 USE_PRIORITY_FREQ = False
 USE_L1_LOSS = False
-SPEC_ENHANCE_FACTOR = 1  # 0 for log; 1 for abs; 2 for pow; 3 for combine
+# 0 for log; 1 for abs; 2 for pow; 3 for combine, 4 for db_normalize
+SPEC_ENHANCE_FACTOR = 1
 USE_MEL = False
+AVG_OVER_TIME = False
 # ###########################################
 # modify mutex options
 # ###########################################
@@ -35,7 +37,7 @@ class PWNHelper(object):
         y = tf.abs(x)
 
         if USE_MEL:
-            y = mel_extractor.tf_melspectrogram2(y)
+            y = mel_extractor.tf_melspec_from_spec(y)
 
         if SPEC_ENHANCE_FACTOR == 0:
             y = tf.log(tf.maximum(y, 1e-5))
@@ -48,15 +50,21 @@ class PWNHelper(object):
             y2 = rw_fn(0.2) * tf.pow(y, 1.2)
             y3 = rw_fn(0.2) * tf.pow(y, 1.5)
             y = tf.concat([y0, y1, y2, y3], axis=0)
+        elif SPEC_ENHANCE_FACTOR == 4:
+            y = mel_extractor.tf_spec_db_normalize(y)
 
         return y
 
     @staticmethod
     def diff_fn(orig_feat, pred_feat):
+        if AVG_OVER_TIME:
+            orig_feat = tf.reduce_mean(orig_feat, axis=1, keep_dims=True)
+            pred_feat = tf.reduce_mean(pred_feat, axis=1, keep_dims=True)
+
         if USE_L1_LOSS:
             diff = tf.abs(orig_feat - pred_feat)
         else:
-            diff = 0.5 * tf.squared_difference(orig_feat, pred_feat)
+            diff = tf.squared_difference(orig_feat, pred_feat)
         return diff
 
     @staticmethod
@@ -353,7 +361,7 @@ class ParallelWavenet(object):
 
     @lru_cache(maxsize=1)
     def stft_feat_mean_std_np(self):
-        return mel_extractor.spec_feat_mean_std(
+        return reader.spec_feat_mean_std(
             self.train_path, feat_fn=self.stft_feat_fn)
 
     def stft_feat_mean_std_tf(self):
@@ -395,8 +403,19 @@ class ParallelWavenet(object):
 
         return {'power_loss': avg_loss}
 
+    def contrastive_loss(self, ff_dict, num_samples=100):
+        ff_dict_for_cl = {
+            'x': ff_dict['x'],
+            'mel': ff_dict['mel_rand'],
+            'mean_tot': ff_dict['mean_tot'],
+            'scale_tot': ff_dict['scale_tot'],
+            'log_scale_tot': ff_dict['log_scale_tot']}
+        contrastive_loss = -self.kl_loss(ff_dict_for_cl, num_samples=num_samples)['kl_loss']
+        return {'contrastive_loss': contrastive_loss}
+
     def calculate_loss(self, ff_dict):
         plf = self.hparams.power_loss_factor
+        clf = self.hparams.contrastive_loss_factor
         num_samples = self.hparams.num_samples
         loss_dict = self.kl_loss(ff_dict, num_samples)
         loss = loss_dict['kl_loss']
@@ -404,5 +423,9 @@ class ParallelWavenet(object):
             pl_dict = self.power_loss(ff_dict)
             loss += plf * pl_dict['power_loss']
             loss_dict.update(pl_dict)
+        if clf > 0.0:
+            cl_dict = self.contrastive_loss(ff_dict, num_samples)
+            loss += clf * cl_dict['contrastive_loss']
+            loss_dict.update(cl_dict)
         loss_dict.update({'loss': loss})
         return loss_dict

@@ -3,7 +3,6 @@ import librosa.filters
 import numpy as np
 import tensorflow as tf
 import math
-from auxilaries import reader, utils
 from functools import lru_cache
 
 from scipy import signal
@@ -19,11 +18,11 @@ mel_params = tf.contrib.training.HParams(
     frame_shift_ms=12.5,
     frame_length_ms=50,
     preemphasis=0.97,
-    mel_min_level_db=-100,
-    spec_min_level_db=-140,
-    spec_ref_level_db=40,
+    min_level_db=-140,
+    ref_level_db=40,
     mel_fmin=125,
-    mel_fmax=7600)
+    mel_fmax=7600,
+    min_amp=1e-5)
 
 PRIORITY_FREQ = int(3000 / (mel_params.sample_rate * 0.5) * mel_params.num_freq)
 FRAME_SHIFT = int(mel_params.frame_shift_ms * mel_params.sample_rate / 1000.)
@@ -32,7 +31,7 @@ FRAME_SHIFT = int(mel_params.frame_shift_ms * mel_params.sample_rate / 1000.)
 def melspectrogram(y):
     D = _stft(y, mel_params)
     S = _amp_to_db(_linear_to_mel(np.abs(D), mel_params))
-    NS = _normalize(S, mel_params.mel_min_level_db)
+    NS = _normalize(S, mel_params.min_level_db)
     return NS.T.astype(np.float32)
 
 
@@ -84,11 +83,7 @@ def _build_mel_basis(mel_params):
 
 
 def _amp_to_db(x):
-    return 20 * np.log10(np.maximum(1e-5, x))
-
-
-def _preemphasis(x, mel_params):
-    return signal.lfilter([1, -mel_params.preemphasis], [1], x)
+    return 20 * np.log10(np.maximum(mel_params.min_amp, x))
 
 
 def _normalize(S, min_level_db):
@@ -105,7 +100,7 @@ def log10(x):
 
 
 def _tf_amp_to_db(x):
-    return 20 * log10(tf.maximum(1e-5, x))
+    return 20 * log10(tf.maximum(mel_params.min_amp, x))
 
 
 def _tf_normalize(S, min_level_db):
@@ -128,28 +123,15 @@ def _tf_stft(y):
 
 def tf_spectrogram(y):
     D = _tf_stft(y)
-    S = _tf_amp_to_db(tf.abs(D)) - mel_params.spec_ref_level_db
-    NS = _tf_normalize(S, mel_params.spec_min_level_db)
+    S = _tf_amp_to_db(tf.abs(D)) - mel_params.ref_level_db
+    NS = _tf_normalize(S, mel_params.min_level_db)
     return NS
 
 
-def spec_feat_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
-    local_graph = tf.Graph()
-    with local_graph.as_default():
-        input_vals = reader.get_init_batch(
-            train_path, batch_size=4096, seq_len=7680, first_n=10000)['wav']
-        ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
-        feat = feat_fn(_tf_stft(ph))
-
-    tf.logging.info('Calculating mean and std for stft feat.')
-    config = tf.ConfigProto(device_count={'GPU': 0})
-    sess = tf.Session(config=config, graph=local_graph)
-    feat_val = sess.run(feat, feed_dict={ph: input_vals})
-    mean_val = np.mean(feat_val, axis=(0, 1))
-    std_val = np.std(feat_val, axis=(0, 1))
-    tf.logging.info('Done calculating mean and std for stft feat.')
-
-    return mean_val, std_val
+def tf_spec_db_normalize(s):
+    S = _tf_amp_to_db(s) - mel_params.ref_level_db
+    NS = _tf_normalize(S, mel_params.min_level_db)
+    return NS
 
 
 @lru_cache(maxsize=1)
@@ -164,9 +146,38 @@ def _tf_build_mel_basis(graph):
         upper_edge_hertz=mel_params.mel_fmax)
 
 
-def tf_melspectrogram2(spec):
+@lru_cache(maxsize=1)
+def _tf_build_mel_basis2(graph):
+    global _mel_basis
+    if _mel_basis is None:
+        _mel_basis = _build_mel_basis(mel_params)
+    return tf.cast(_mel_basis.T, np.float32)
+
+
+def tf_melspec_from_spec(spec):
     graph = tf.get_default_graph()
-    mel_basis = _tf_build_mel_basis(graph)
+    mel_basis = _tf_build_mel_basis2(graph)
     mel_spec = tf.tensordot(spec, mel_basis, 1)
     mel_spec.set_shape(spec.shape[:-1].concatenate(mel_basis.shape[-1:]))
     return mel_spec
+
+
+def tf_melspectrogram2(y):
+    spec = tf.abs(_tf_stft(y))
+    mel_spec = tf_melspec_from_spec(spec)
+    norm_mel_spec = _tf_normalize(_tf_amp_to_db(mel_spec), mel_params.min_level_db)
+    return norm_mel_spec
+
+
+def batch_melspectrogram2(y):
+    local_graph = tf.Graph()
+    with local_graph.as_default():
+        ph = tf.placeholder(tf.float32, shape=y.shape)
+        mel_spec = tf_melspectrogram2(ph)
+
+    tf.logging.info('Calculate initial mel spectrogram batch')
+    config = tf.ConfigProto(device_count={'GPU': 0})
+    sess = tf.Session(config=config, graph=local_graph)
+    mel_spec_val = sess.run(mel_spec, feed_dict={ph: y})
+    tf.logging.info('Done calculate initial mel spectrogram batch')
+    return mel_spec_val

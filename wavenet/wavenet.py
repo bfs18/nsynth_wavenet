@@ -4,7 +4,7 @@ from auxilaries import reader, utils
 from wavenet import masked, loss_func
 
 
-DOUBLE_GATE_WIDTH = False  # support for old models.
+DOUBLE_GATE_WIDTH = True  # support for old models.
 DEFAULT_LR_SCHEDULE = {
     0: 2e-4,
     90000: 4e-4 / 3,
@@ -14,8 +14,8 @@ DEFAULT_LR_SCHEDULE = {
     210000: 6e-6,
     240000: 2e-6}
 ################################################################
-USE_RESIZE_CONV = False
 # use resize_conv1d instead of trans_conv1d, also change parallel wavenet.
+USE_RESIZE_CONV = False
 
 
 class WNHelper(object):
@@ -287,6 +287,33 @@ class Fastgen(object):
             self.out_width = mol_mix * 3
         else:
             raise ValueError('[{}] loss is not supported')
+
+    # used for data visualization
+    def cond_vars(self, inputs):
+        num_layers = self.hparams.num_layers
+        width = self.hparams.width
+        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
+        skip_width = self.hparams.skip_width
+        use_weight_norm = self.use_weight_norm
+
+        mel_en = inputs['encoding']
+
+        cond_var_dict = {}
+        for i in range(num_layers):
+            cond_layer_name = 'mel_cond_%d' % (i + 1)
+            cond_var_dict[cond_layer_name] = masked.conv1d(
+                mel_en,
+                num_filters=gate_width,
+                filter_length=1,
+                name=cond_layer_name,
+                use_weight_norm=use_weight_norm)
+        cond_var_dict['mel_cond_out1'] = masked.conv1d(
+            mel_en,
+            num_filters=skip_width,
+            filter_length=1,
+            name='mel_cond_out1',
+            use_weight_norm=use_weight_norm)
+        return cond_var_dict
 
     def sample(self, inputs):
         """Build the graph for this configuration.

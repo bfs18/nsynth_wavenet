@@ -25,11 +25,37 @@ import random
 
 from auxilaries import mel_extractor
 
+# tf_melspectrogram extracts normalized log mel spectrogram
+# tf_melspectrogram2 extracts mel spectrogram
+USE_NEW_MEL_EXTRACTOR = False
+
+if USE_NEW_MEL_EXTRACTOR:
+    MELSPECTROGRAM = mel_extractor.tf_melspectrogram2
+    BATCH_MELSPECTROGRAM = mel_extractor.batch_melspectrogram2
+else:
+    MELSPECTROGRAM = mel_extractor.tf_melspectrogram
+    BATCH_MELSPECTROGRAM = mel_extractor.batch_melspectrogram
 
 FEATURES = {
     'audio_id': tf.FixedLenFeature([], dtype=tf.string),
     'audio': tf.FixedLenFeature([], dtype=tf.string),
     'length': tf.FixedLenFeature([], dtype=tf.int64)}
+
+
+def _tf_instance_log_mean_norm(tf_mel):
+    log_mel = tf.log(tf.maximum(tf_mel, 1e-5))
+    log_mel_mean = tf.reduce_mean(log_mel, axis=1, keepdims=True)
+    norm_log_mel = log_mel - log_mel_mean
+    norm_mel = tf.exp(norm_log_mel)
+    return norm_mel
+
+
+def _np_instance_log_mean_norm(np_mel):
+    log_mel = np.log(np.maximum(np_mel, 1e-5))
+    log_mel_mean = np.mean(log_mel, axis=1, keepdims=True)
+    norm_log_mel = log_mel - log_mel_mean
+    norm_mel = np.exp(norm_log_mel)
+    return norm_mel
 
 
 class Dataset(object):
@@ -61,7 +87,7 @@ class Dataset(object):
         if self.is_training:
             crop = tf.random_crop(wav, [length])
             crop = tf.reshape(crop, [length])
-            mel = mel_extractor.tf_melspectrogram(crop)
+            mel = MELSPECTROGRAM(crop)
             key, crop, mel = tf.train.shuffle_batch(
                 [key, crop, mel],
                 batch_size,
@@ -72,7 +98,7 @@ class Dataset(object):
         else:
             crop = tf.slice(wav, [0], [length])
             crop = tf.reshape(crop, [length])
-            mel = mel_extractor.tf_melspectrogram(crop)
+            mel = MELSPECTROGRAM(crop)
             key, crop, mel = tf.train.batch(
                 [key, crop, mel],
                 batch_size,
@@ -106,8 +132,26 @@ def get_init_batch(train_path, batch_size, seq_len=7680, first_n=1000):
         wave = np.frombuffer(bytes, dtype=np.float32)
         batch_waves.append(np_random_crop(wave, crop_len=seq_len))
     batch_waves = np.stack(batch_waves)
-    batch_mels = mel_extractor.batch_melspectrogram(batch_waves)
+    batch_mels = BATCH_MELSPECTROGRAM(batch_waves)
 
     return {'wav': batch_waves, 'mel': batch_mels}
 
+
+def spec_feat_mean_std(train_path, feat_fn=lambda x: tf.pow(tf.abs(x), 2.0)):
+    local_graph = tf.Graph()
+    with local_graph.as_default():
+        input_vals = get_init_batch(
+            train_path, batch_size=4096, seq_len=7680, first_n=10000)['wav']
+        ph = tf.placeholder(dtype=np.float32, shape=[4096, 7680])
+        feat = feat_fn(mel_extractor._tf_stft(ph))
+
+    tf.logging.info('Calculating mean and std for stft feat.')
+    config = tf.ConfigProto(device_count={'GPU': 0})
+    sess = tf.Session(config=config, graph=local_graph)
+    feat_val = sess.run(feat, feed_dict={ph: input_vals})
+    mean_val = np.mean(feat_val, axis=(0, 1))
+    std_val = np.std(feat_val, axis=(0, 1))
+    tf.logging.info('Done calculating mean and std for stft feat.')
+
+    return mean_val, std_val
 

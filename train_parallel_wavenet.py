@@ -82,6 +82,8 @@ def train(args):
         tf.summary.scalar("H_Ps_Pt", loss_dict['H_Ps_Pt'])
         if 'power_loss' in loss_dict:
             tf.summary.scalar('power_loss', loss_dict['power_loss'])
+        if 'contrastive_loss' in loss_dict:
+            tf.summary.scalar('contrastive_loss', loss_dict['contrastive_loss'])
 
     if args.log_root:
         logdir_name = config_str.get_config_time_str(st_hparams, 'parallel_wavenet', EXP_TAG)
@@ -105,6 +107,9 @@ def train(args):
 
         with tf.device(deploy_config.inputs_device()):
             inputs_dict = pwn.get_batch(clone_batch_size)
+            # get a mel batch not corresponding to the wave batch.
+            # if contrastive loss is not used, this input operation will not be evaluated.
+            inputs_dict['mel_rand'] = pwn.get_batch(clone_batch_size)['mel']
 
         summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
 

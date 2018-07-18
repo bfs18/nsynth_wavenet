@@ -88,6 +88,33 @@ def encode(hparams, wav_data, checkpoint_path):
     return encoding
 
 
+def load_cond_layers(hparams, batch_size=1, en_length=320):
+    fg = wavenet.Fastgen(hparams)
+    mel_en_width = fg.hparams.deconv_width
+    mel_en_ph = tf.placeholder(tf.float32, [batch_size, en_length, mel_en_width])
+    cond_var_dict = fg.cond_vars({'encoding': mel_en_ph})
+    return {'encoding_in': mel_en_ph,
+            'cond_vars': cond_var_dict}
+
+
+def calculate_cond_vars(hparams, encoding, checkpoint_path):
+    session_config = tf.ConfigProto(allow_soft_placement=True, device_count={'GPU': 0})
+    session_config.gpu_options.allow_growth = True
+    with tf.Graph().as_default(), tf.Session(config=session_config) as sess:
+        batch_size, en_length, en_dim = encoding.shape
+        cond_dict = load_cond_layers(hparams, batch_size, en_length)
+
+        # model use ExponentialMovingAverage
+        tf_vars = tf.trainable_variables()
+        shadow_var_dict = get_ema_shadow_dict(tf_vars)
+        saver = tf.train.Saver(shadow_var_dict)
+        saver.restore(sess, checkpoint_path)
+
+        cond_vars = sess.run(
+            cond_dict['cond_vars'], feed_dict={cond_dict['encoding_in']: encoding})
+    return cond_vars
+
+
 def load_fastgen(hparams, batch_size=1):
     deconv_width = hparams.deconv_width
     fg = wavenet.Fastgen(hparams, batch_size)
