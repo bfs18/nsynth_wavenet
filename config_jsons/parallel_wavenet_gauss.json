@@ -1,0 +1,15 @@
+{
+  "num_iters": 200000,
+  "wave_length": 7680,
+  "num_stages": 10,
+  "num_iaf_layers": [10, 10, 10, 30],
+  "filter_length": 3,
+  "width": 64,
+  "deconv_width": 256,
+  "deconv_config": [[40, 10], [80, 20]],
+  "use_mu_law": true,
+  "loss_type": "gauss",
+  "use_weight_norm": false,
+  "use_resize_conv": false,
+  "power_loss_factor": 1.0
+}

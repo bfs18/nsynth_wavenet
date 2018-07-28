@@ -39,11 +39,26 @@ def train(args):
     ###
     # get student info.
     ###
-    if args.config is None:
-        raise RuntimeError('No config json specified.')
-    with open(args.config, 'rt') as F:
-        configs = json.load(F)
-    st_hparams = Namespace(**configs)
+    if args.log_root:
+        if args.config is None:
+            raise RuntimeError('No config json specified.')
+        tf.logging.info('using config form {}'.format(args.config))
+        with open(args.config, 'rt') as F:
+            configs = json.load(F)
+        st_hparams = Namespace(**configs)
+        logdir_name = config_str.get_config_time_str(st_hparams, 'parallel_wavenet', EXP_TAG)
+        logdir = os.path.join(args.log_root, logdir_name)
+        os.makedirs(logdir, exist_ok=True)
+        shutil.copy(args.config, logdir)
+    else:
+        logdir = args.logdir
+        config_json = glob.glob(os.path.join(logdir, '*.json'))[0]
+        tf.logging.info('using config form {}'.format(config_json))
+        with open(config_json, 'rt') as F:
+            configs = json.load(F)
+        st_hparams = Namespace(**configs)
+    tf.logging.info('Saving to {}'.format(logdir))
+
     pwn = parallel_wavenet.ParallelWavenet(st_hparams, teacher, args.train_path)
 
     def _data_dep_init():
@@ -56,8 +71,7 @@ def train(args):
         init_ff_dict = pwn.feed_forward(_inputs_dict, init=True)
 
         def callback(session):
-            tf.logging.info('Running data dependent initialization ' 
-                            'for weight normalization')
+            tf.logging.info('Calculate initial statistics.')
             init_out = session.run(
                 init_ff_dict, feed_dict={_inputs_dict['mel']: mel_data})
             new_x = init_out['x']
@@ -66,8 +80,7 @@ def train(args):
             _init_logging(new_x, 'new_x')
             _init_logging(mean, 'mean')
             _init_logging(scale, 'scale')
-            tf.logging.info('Done data dependent initialization '
-                            'for weight normalization')
+            tf.logging.info('Done Calculate initial statistics.')
         return callback
 
     def _model_fn(_inputs_dict):
@@ -77,23 +90,8 @@ def train(args):
         loss = loss_dict['loss']
         tf.add_to_collection(tf.GraphKeys.LOSSES, loss)
 
-        tf.summary.scalar("kl_loss", loss_dict['kl_loss'])
-        tf.summary.scalar("H_Ps", loss_dict['H_Ps'])
-        tf.summary.scalar("H_Ps_Pt", loss_dict['H_Ps_Pt'])
-        if 'power_loss' in loss_dict:
-            tf.summary.scalar('power_loss', loss_dict['power_loss'])
-        if 'contrastive_loss' in loss_dict:
-            tf.summary.scalar('contrastive_loss', loss_dict['contrastive_loss'])
-
-    if args.log_root:
-        logdir_name = config_str.get_config_time_str(st_hparams, 'parallel_wavenet', EXP_TAG)
-        logdir = os.path.join(args.log_root, logdir_name)
-    else:
-        logdir = args.logdir
-    tf.logging.info('Saving to {}'.format(logdir))
-
-    os.makedirs(logdir, exist_ok=True)
-    shutil.copy(args.config, logdir)
+        for loss_key, loss_val in loss_dict.items():
+            tf.summary.scalar(loss_key, loss_val)
 
     with tf.Graph().as_default():
         total_batch_size = args.total_batch_size
@@ -184,7 +182,7 @@ def train(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument("--config", required=True,
+    parser.add_argument("--config", required=False,
                         help="Model configuration name")
     parser.add_argument("--train_path", required=True,
                         help="The path to the train tfrecord.")

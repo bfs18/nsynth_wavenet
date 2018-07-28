@@ -19,9 +19,21 @@ from __future__ import print_function
 
 # internal imports
 import tensorflow as tf
+from functools import partial
 
 
 WN_INIT_SCALE = 1.0
+
+
+def get_upsample_act(act_str):
+    if act_str == 'tanh':
+        return tf.nn.tanh
+    elif act_str == 'relu':
+        return tf.nn.relu
+    elif act_str == 'leaky_relu':
+        return partial(tf.nn.leaky_relu, alpha=0.4)
+    else:
+        raise ValueError('Unsupported activation function for upsample layer')
 
 
 def shift_right(x):
@@ -222,7 +234,7 @@ def trans_conv1d(x,
                  filter_length,
                  stride,
                  name,
-                 activation=tf.nn.tanh,
+                 activation,
                  kernel_initializer=tf.random_normal_initializer(0, 0.05),
                  biases_initializer=tf.constant_initializer(0.0),
                  use_weight_norm=False,
@@ -281,7 +293,7 @@ def resize_conv1d(x,
                   filter_length,
                   stride,
                   name,
-                  activation=tf.nn.tanh,
+                  activation,
                   kernel_initializer=tf.random_normal_initializer(0, 0.05),
                   bias_initializer=tf.constant_initializer(0.0),
                   use_weight_norm=False,
@@ -315,7 +327,7 @@ def _trans_conv1d(x,
                   filter_length,
                   stride,
                   name,
-                  activation=tf.nn.tanh,
+                  activation,
                   kernel_initializer=tf.uniform_unit_scaling_initializer(1.15),
                   biases_initializer=tf.constant_initializer(0.0)):
     batch_size, length, num_input_channels = x.get_shape().as_list()

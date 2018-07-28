@@ -4,7 +4,6 @@ from auxilaries import reader, utils
 from wavenet import masked, loss_func
 
 
-DOUBLE_GATE_WIDTH = True  # support for old models.
 DEFAULT_LR_SCHEDULE = {
     0: 2e-4,
     90000: 4e-4 / 3,
@@ -15,7 +14,6 @@ DEFAULT_LR_SCHEDULE = {
     240000: 2e-6}
 ################################################################
 # use resize_conv1d instead of trans_conv1d, also change parallel wavenet.
-USE_RESIZE_CONV = False
 
 
 class WNHelper(object):
@@ -23,15 +21,18 @@ class WNHelper(object):
 
     @staticmethod
     def upsample_conv1d(
-            x, num_filters, filter_length, stride, name_patt,
+            x, num_filters, filter_length, stride,
+            use_resize_conv, name_patt, act='tanh',
             use_weight_norm=False, init=False):
+        act_func = masked.get_upsample_act(act)
         conv_args = {"x": x,
                      "num_filters": num_filters,
                      "filter_length": filter_length,
                      "stride": stride,
+                     "activation": act_func,
                      "use_weight_norm": use_weight_norm,
                      "init": init}
-        if USE_RESIZE_CONV:
+        if use_resize_conv:
             y = masked.resize_conv1d(
                 **conv_args, name=name_patt.format("resize_conv"))
         else:
@@ -40,7 +41,8 @@ class WNHelper(object):
         return y
 
 
-def _deconv_stack(inputs, width, config, name='',
+def _deconv_stack(inputs, width, config, use_resize_conv,
+                  act='tanh', name='',
                   use_weight_norm=False, init=False):
     b, l, _ = inputs.get_shape().as_list()
     frame_shift = int(np.prod([c[1] for c in config]))
@@ -56,7 +58,9 @@ def _deconv_stack(inputs, width, config, name='',
             num_filters=width,
             filter_length=fl,
             stride=s,
+            use_resize_conv=use_resize_conv,
             name_patt=tc_name,
+            act=act,
             use_weight_norm=use_weight_norm,
             init=init)
     mel_en.set_shape([b, l * frame_shift, width])
@@ -93,6 +97,9 @@ class Wavenet(object):
         self.wave_length = self.hparams.wave_length
 
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
+        self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
+        self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
+        self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
         self.use_mu_law = self.hparams.use_mu_law
@@ -106,6 +113,8 @@ class Wavenet(object):
         elif self.loss_type == 'mol':
             mol_mix = self.hparams.mol_mix
             self.out_width = mol_mix * 3
+        elif self.loss_type == 'gauss':
+            self.out_width = 2
         else:
             raise ValueError('[{}] loss is not supported')
 
@@ -119,8 +128,12 @@ class Wavenet(object):
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_weight_norm = self.use_weight_norm
+        use_resize_conv = self.use_resize_conv
+        upsample_act = self.upsample_act
 
         mel_en = _deconv_stack(mel, deconv_width, deconv_config,
+                               act=upsample_act,
+                               use_resize_conv=use_resize_conv,
                                use_weight_norm=use_weight_norm,
                                init=init)
         return {'encoding': mel_en}
@@ -172,7 +185,7 @@ class Wavenet(object):
         out_width = self.out_width
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
-        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
+        gate_width = 2 * width if self.double_gate_width else width
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -260,6 +273,8 @@ class Wavenet(object):
         elif loss_type == 'mol':
             quant_chann = self.quant_chann
             loss = loss_func.mol_loss(out, real_targets, quant_chann)
+        elif loss_type == 'gauss':
+            loss = loss_func.gauss_loss(out, real_targets)
         else:
             raise ValueError('[{}] loss is not supported.'.format(loss_type))
         return {'loss': loss}
@@ -276,6 +291,7 @@ class Fastgen(object):
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.use_mu_law = self.hparams.use_mu_law
         self.loss_type = self.hparams.loss_type
+        self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -285,6 +301,8 @@ class Fastgen(object):
         elif self.loss_type == 'mol':
             mol_mix = self.hparams.mol_mix
             self.out_width = mol_mix * 3
+        elif self.loss_type == 'gauss':
+            self.out_width = 2
         else:
             raise ValueError('[{}] loss is not supported')
 
@@ -292,7 +310,7 @@ class Fastgen(object):
     def cond_vars(self, inputs):
         num_layers = self.hparams.num_layers
         width = self.hparams.width
-        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
+        gate_width = 2 * width if self.double_gate_width else width
         skip_width = self.hparams.skip_width
         use_weight_norm = self.use_weight_norm
 
@@ -337,7 +355,7 @@ class Fastgen(object):
         out_width = self.out_width
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
-        gate_width = 2 * width if DOUBLE_GATE_WIDTH else width
+        gate_width = 2 * width if self.double_gate_width else width
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
@@ -428,6 +446,8 @@ class Fastgen(object):
             sample = loss_func.ce_sample(out, quant_chann)
         elif loss_type == 'mol':
             sample = loss_func.mol_sample(out, quant_chann)
+        elif loss_type == 'gauss':
+            sample = loss_func.gauss_sample(out, quant_chann)
         else:
             raise ValueError('[{}] loss is not supported.'.format(loss_type))
 

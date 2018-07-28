@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import shutil
 import os
+import glob
 from argparse import ArgumentParser, Namespace
 from wavenet import wavenet
 from deployment import model_deploy
@@ -26,11 +27,25 @@ def train(args):
     clone_on_cpu = args.gpu_id == ''
     num_clones = len(args.gpu_id.split(','))
 
-    if args.config is None:
-        raise RuntimeError('No config json specified.')
-    with open(args.config, 'rt') as F:
-        configs = json.load(F)
-    hparams = Namespace(**configs)
+    if args.log_root:
+        if args.config is None:
+            raise RuntimeError('No config json specified.')
+        tf.logging.info('using config form {}'.format(args.config))
+        with open(args.config, 'rt') as F:
+            configs = json.load(F)
+        hparams = Namespace(**configs)
+        logdir_name = config_str.get_config_time_str(hparams, 'wavenet', EXP_TAG)
+        logdir = os.path.join(args.log_root, logdir_name)
+        os.makedirs(logdir, exist_ok=True)
+        shutil.copy(args.config, logdir)
+    else:
+        logdir = args.logdir
+        config_json = glob.glob(os.path.join(logdir, '*.json'))[0]
+        tf.logging.info('using config form {}'.format(config_json))
+        with open(config_json, 'rt') as F:
+            configs = json.load(F)
+        hparams = Namespace(**configs)
+    tf.logging.info('Saving to {}'.format(logdir))
 
     wn = wavenet.Wavenet(hparams, os.path.abspath(os.path.expanduser(args.train_path)))
     # At training, wavenet never see the output values of parallel wavenet
@@ -55,18 +70,22 @@ def train(args):
         init_ff_dict = wn.feed_forward(_inputs_dict, init=True)
 
         def callback(session):
-            tf.logging.info('Running data dependent initialization ' 
-                            'for weight normalization')
+            tf.logging.info('Calculate initial statistics.')
             init_out = session.run(
                 init_ff_dict, feed_dict={_inputs_dict['wav']: wave_data,
                                          _inputs_dict['mel']: mel_data})
             init_out_params = init_out['out_params']
-            _, log_scale, mean = np.split(init_out_params, 3, axis=2)
-            scale = np.exp(np.maximum(log_scale, -7.0))
-            _init_logging(mean, 'mean')
-            _init_logging(scale, 'scale')
-            tf.logging.info('Done data dependent initialization '
-                            'for weight normalization')
+            if wn.loss_type == 'mol':
+                _, mean, log_scale = np.split(init_out_params, 3, axis=2)
+                scale = np.exp(np.maximum(log_scale, -7.0))
+                _init_logging(mean, 'mean')
+                _init_logging(scale, 'scale')
+            elif wn.loss_type == 'gauss':
+                mean, log_std = np.split(init_out_params, 2, axis=2)
+                std = np.exp(np.maximum(log_std, -7.0))
+                _init_logging(mean, 'mean')
+                _init_logging(std, 'std')
+            tf.logging.info('Done Calculate initial statistics.')
         return callback
 
     def _model_fn(_inputs_dict):
@@ -77,16 +96,6 @@ def train(args):
         loss_dict = wn.calculate_loss(ff_dict)
         loss = loss_dict['loss']
         tf.add_to_collection(tf.GraphKeys.LOSSES, loss)
-
-    if args.log_root:
-        logdir_name = config_str.get_config_time_str(hparams, 'wavenet', EXP_TAG)
-        logdir = os.path.join(args.log_root, logdir_name)
-    else:
-        logdir = args.logdir
-    tf.logging.info('Saving to {}'.format(logdir))
-
-    os.makedirs(logdir, exist_ok=True)
-    shutil.copy(args.config, logdir)
 
     with tf.Graph().as_default():
         total_batch_size = args.total_batch_size
@@ -158,7 +167,7 @@ def train(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument("--config", required=True,
+    parser.add_argument("--config", required=False,
                         help="Model configuration name")
     parser.add_argument("--train_path", required=True,
                         help="The path to the train tfrecord.")

@@ -41,10 +41,13 @@ def get_config_srt(hparams, model, tag=''):
     if reader.USE_NEW_MEL_EXTRACTOR:
         cstr += '-NM'
 
-    if wavenet.USE_RESIZE_CONV:
+    if getattr(hparams, 'use_resize_conv', False):
         cstr += '-RS'
     else:
         cstr += '-TS'
+
+    upsample_act = getattr(hparams, 'upsample_act', 'tanh')
+    cstr += ('-' + upsample_act)
 
     if model == 'parallel_wavenet':
         if parallel_wavenet.USE_LOG_SCALE:
@@ -65,15 +68,8 @@ def get_config_srt(hparams, model, tag=''):
             cstr += '-NPOW' if parallel_wavenet.NORM_FEAT else '-POW'
         elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 3:
             cstr += '-NCOM' if parallel_wavenet.NORM_FEAT else '-COM'
-        elif parallel_wavenet.SPEC_ENHANCE_FACTOR == 3:
-            cstr += '-NDBN' if parallel_wavenet.NORM_FEAT else '-DBN'
         else:
             raise ValueError("SPEC_ENHANCE_FACTOR Value Error.")
-
-        if parallel_wavenet.AVG_OVER_TIME:
-            cstr += '-AOT'
-        else:
-            cstr += '-n_AOT'
 
         if parallel_wavenet.USE_MEL:
             cstr += '-MEL'

@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-from functools import partial, lru_cache
+from functools import lru_cache
 from wavenet import wavenet, masked, loss_func
 from auxilaries import utils, mel_extractor, reader
 
@@ -20,10 +20,9 @@ NORM_FEAT = False
 # ###########################################
 USE_PRIORITY_FREQ = False
 USE_L1_LOSS = False
-# 0 for log; 1 for abs; 2 for pow; 3 for combine, 4 for db_normalize
+# 0 for log; 1 for abs; 2 for pow; 3 for combine
 SPEC_ENHANCE_FACTOR = 1
 USE_MEL = False
-AVG_OVER_TIME = False
 # ###########################################
 # modify mutex options
 # ###########################################
@@ -50,17 +49,11 @@ class PWNHelper(object):
             y2 = rw_fn(0.2) * tf.pow(y, 1.2)
             y3 = rw_fn(0.2) * tf.pow(y, 1.5)
             y = tf.concat([y0, y1, y2, y3], axis=0)
-        elif SPEC_ENHANCE_FACTOR == 4:
-            y = mel_extractor.tf_spec_db_normalize(y)
 
         return y
 
     @staticmethod
     def diff_fn(orig_feat, pred_feat):
-        if AVG_OVER_TIME:
-            orig_feat = tf.reduce_mean(orig_feat, axis=1, keep_dims=True)
-            pred_feat = tf.reduce_mean(pred_feat, axis=1, keep_dims=True)
-
         if USE_L1_LOSS:
             diff = tf.abs(orig_feat - pred_feat)
         else:
@@ -131,7 +124,9 @@ class ParallelWavenet(object):
         self.use_mu_law = self.hparams.use_mu_law
         self.wave_length = self.hparams.wave_length
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
-
+        self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
+        self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
+        self.loss_type = getattr(self.hparams, 'loss_type', 'logistic')
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -141,10 +136,12 @@ class ParallelWavenet(object):
         # generation needs no teacher
         if teacher is not None:
             self.teacher = teacher
-            assert teacher.loss_type == 'mol'
+            assert (teacher.loss_type == 'mol' and self.loss_type == 'logistic' or
+                    teacher.loss_type == 'gauss' and self.loss_type == 'gauss')
             # when using st._clip_quant_scale and te.encode_signal,
             # There is no need for te.use_mu_law and st.use_mu_law to be consistent.
             assert teacher.use_mu_law == self.use_mu_law
+            assert teacher.use_resize_conv == self.use_resize_conv
 
             self.stft_feat_fn = PWNHelper.stft_feat_fn
 
@@ -161,6 +158,12 @@ class ParallelWavenet(object):
         rl = tf.log(ru) - tf.log(1. - ru)
         return rl
 
+    @staticmethod
+    def _normal_0_1(batch_size, length):
+        normal_0_1 = tf.contrib.distributions.Normal(loc=0., scale=1.)
+        rn = normal_0_1.sample([batch_size, length])
+        return rn
+
     def _create_iaf(self, inputs, iaf_idx, init):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
@@ -170,6 +173,8 @@ class ParallelWavenet(object):
         deconv_width = self.hparams.deconv_width
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_weight_norm = self.use_weight_norm
+        use_resize_conv = self.use_resize_conv
+        upsample_act = self.upsample_act
         gate_width = width
         final_init, final_bias = PWNHelper.manual_finit_or_not_fn(init, iaf_idx)
 
@@ -179,7 +184,8 @@ class ParallelWavenet(object):
         iaf_name = 'iaf_{:d}'.format(iaf_idx + 1)
 
         mel_en = wavenet._deconv_stack(
-            mel, deconv_width, deconv_config, name=iaf_name,
+            mel, deconv_width, deconv_config,
+            act=upsample_act, use_resize_conv=use_resize_conv, name=iaf_name,
             use_weight_norm=use_weight_norm, init=init)
 
         l = masked.shift_right(x)
@@ -261,7 +267,10 @@ class ParallelWavenet(object):
         batch_size, num_frames, _ = mel.get_shape().as_list()
         # length must be a multiple of dilation length
         length = (num_frames * frame_shift // max_dilation) * max_dilation
-        x = self._logistic_0_1(batch_size, length)
+        if self.loss_type == "logistic":
+            x = self._logistic_0_1(batch_size, length)
+        else:
+            x = self._normal_0_1(batch_size, length)
 
         iaf_x = tf.expand_dims(x, axis=2)
         mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
@@ -309,7 +318,7 @@ class ParallelWavenet(object):
             x_scaled = utils.inv_cast_quantize(x_quantized, quant_chann)
         return x_scaled
 
-    def kl_loss(self, ff_dict, num_samples=100):
+    def kl_loss_logistic(self, ff_dict, num_samples=100):
         teacher = self.teacher
         quant_chann = self.quant_chann
 
@@ -351,6 +360,31 @@ class ParallelWavenet(object):
         return {'kl_loss': kl_loss,
                 'H_Ps': H_Ps,
                 'H_Ps_Pt': H_Ps_Pt}
+
+    def kl_loss_gauss(self, ff_dict):
+        teacher = self.teacher
+
+        mel = ff_dict['mel']
+        x = ff_dict['x']
+        mean_q = ff_dict['mean_tot']
+        scale_q = ff_dict['scale_tot']
+        log_scale_q = ff_dict['log_scale_tot']
+
+        x_scaled = PWNHelper.clip_or_not_fn(self, x)
+        wn_ff_dict = teacher.feed_forward({'wav_scaled': x_scaled, 'mel': mel})
+        te_params = wn_ff_dict['out_params']
+        mean_p, scale_p = loss_func.mean_std_from_out_params(te_params)
+        log_scale_p = tf.log(scale_p)
+
+        var_q = scale_q ** 2.0
+        var_p = scale_p ** 2.0
+        kl_loss_bl = (log_scale_p - log_scale_q +
+                      (var_q - var_p + (mean_p - mean_q) ** 2.0) / (2.0 * var_p))
+        kl_loss = tf.reduce_mean(kl_loss_bl)
+        reg = tf.reduce_mean(tf.squared_difference(log_scale_p - log_scale_q))
+        kl_loss += 4.0 * reg
+
+        return {'kl_loss': kl_loss}
 
     @staticmethod
     def _trim(x, trim_len):
@@ -410,14 +444,20 @@ class ParallelWavenet(object):
             'mean_tot': ff_dict['mean_tot'],
             'scale_tot': ff_dict['scale_tot'],
             'log_scale_tot': ff_dict['log_scale_tot']}
-        contrastive_loss = -self.kl_loss(ff_dict_for_cl, num_samples=num_samples)['kl_loss']
+        contrastive_loss = -self.kl_loss_logistic(
+            ff_dict_for_cl, num_samples=num_samples)['kl_loss']
         return {'contrastive_loss': contrastive_loss}
 
     def calculate_loss(self, ff_dict):
         plf = self.hparams.power_loss_factor
-        clf = self.hparams.contrastive_loss_factor
-        num_samples = self.hparams.num_samples
-        loss_dict = self.kl_loss(ff_dict, num_samples)
+        if self.loss_type == 'logistic':
+            clf = getattr(self.hparams, "contrastive_loss_factor", 0.0)
+            num_samples = getattr(self.hparams, "num_samples", 0)
+            loss_dict = self.kl_loss_logistic(ff_dict, num_samples)
+        else:
+            clf = 0.
+            num_samples = 0
+            loss_dict = self.kl_loss_gauss(ff_dict)
         loss = loss_dict['kl_loss']
         if plf > 0.0:
             pl_dict = self.power_loss(ff_dict)

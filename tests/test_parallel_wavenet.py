@@ -36,7 +36,8 @@ for i in range(batch_size):
 mel_ph = tf.placeholder(tf.float32, mel_shape, name='mel_ph')
 wav_ph = tf.placeholder(tf.float32, wav_shape, name='wav_ph')
 inputs = {'mel': mel_ph,
-          'wav': wav_ph}
+          'wav': wav_ph,
+          'mel_rand': mel_ph}
 
 tf.set_random_seed(12345)
 pff_dict = parallel_wavenet.feed_forward(inputs)
