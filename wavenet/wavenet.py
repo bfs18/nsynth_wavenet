@@ -341,15 +341,13 @@ class Fastgen(object):
                 num_filters=gate_width,
                 filter_length=1,
                 name=cond_layer_name,
-                use_weight_norm=use_weight_norm,
-                dropout_rate=0.0)
+                use_weight_norm=use_weight_norm)
         cond_var_dict['mel_cond_out1'] = masked.conv1d(
             mel_en,
             num_filters=skip_width,
             filter_length=1,
             name='mel_cond_out1',
-            use_weight_norm=use_weight_norm,
-            dropout_rate=0.0)
+            use_weight_norm=use_weight_norm)
         return cond_var_dict
 
     def sample(self, inputs):

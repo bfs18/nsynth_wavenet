@@ -15,5 +15,5 @@
   "use_resize_conv": false,
   "upsample_act": "leaky_relu",
   "dropout_inputs": false,
-  "use_input_noise": true
+  "use_input_noise": false
 }
