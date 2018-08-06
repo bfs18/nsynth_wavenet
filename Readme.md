@@ -89,9 +89,11 @@ Code status:
 It seems that using mu law make the training easier. So experiment it first.  
 The following examples are more of functional test than gaining good waves. The network may be not trained enough.
 * tune wavenet 
-    * [OK] use_mu_law + ce [LJ001-0001](tests/pred_data-use_mu_law+ce/gen_LJ001-0001.wav) [LJ001-0002](tests/pred_data-use_mu_law+ce/gen_LJ001-0002.wav)
-    * [OK] use_mu_law + mol [LJ001-0001](tests/pred_data-use_mu_law+mol/gen_LJ001-0001.wav) [J001-0002](tests/pred_data-use_mu_law+mol/gen_LJ001-0002.wav)
-    * [OK] no_mu_law + mol [LJ001-0001](tests/pred_data-no_mu_law+mol/gen_LJ001-0001.wav) [LJ001-0002](tests/pred_data-no_mu_law+mol/gen_LJ001-0002.wav)
+    * [OK] use_mu_law + ce [LJ001-0001](tests/pred_data-use_mu_law+ce/gen_LJ001-0001.wav) | [LJ001-0002](tests/pred_data-use_mu_law+ce/gen_LJ001-0002.wav)
+    * [OK] use_mu_law + mol [LJ001-0001](tests/pred_data-use_mu_law+mol/gen_LJ001-0001.wav) | [J001-0002](tests/pred_data-use_mu_law+mol/gen_LJ001-0002.wav)
+    * [OK] no_mu_law + mol [LJ001-0001](tests/pred_data-no_mu_law+mol/gen_LJ001-0001.wav) | [LJ001-0002](tests/pred_data-no_mu_law+mol/gen_LJ001-0002.wav)
+    * [OK] no_mu_law + gauss [LJ001-0001](tests/pred_data-no_mu_law+gauss/gen_LJ001-0001-sample.wav) |
+                             [LJ001-0002](tests/pred_data-no_mu_law+gauss/gen_LJ001-0001-sample.wav) 
 * tune parallel wavenet 
     * use_mu_law
     * no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_pow.wav)
