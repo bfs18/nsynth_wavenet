@@ -94,5 +94,3 @@ if __name__ == '__main__':
                         help="gpu device for generation.")
     args = parser.parse_args()
     generate(args)
-
-

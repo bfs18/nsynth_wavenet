@@ -373,7 +373,8 @@ class ParallelWavenet(object):
         x_scaled = PWNHelper.clip_or_not_fn(self, x)
         wn_ff_dict = teacher.feed_forward({'wav_scaled': x_scaled, 'mel': mel})
         te_params = wn_ff_dict['out_params']
-        mean_p, scale_p = loss_func.mean_std_from_out_params(te_params)
+        mean_p, scale_p = loss_func.mean_std_from_out_params(
+            te_params, use_log_scales=True)
         log_scale_p = tf.log(scale_p)
 
         var_q = scale_q ** 2.0
@@ -381,7 +382,7 @@ class ParallelWavenet(object):
         kl_loss_bl = (log_scale_p - log_scale_q +
                       (var_q - var_p + (mean_p - mean_q) ** 2.0) / (2.0 * var_p))
         kl_loss = tf.reduce_mean(kl_loss_bl)
-        reg = tf.reduce_mean(tf.squared_difference(log_scale_p - log_scale_q))
+        reg = tf.reduce_mean(tf.squared_difference(log_scale_p, log_scale_q))
         kl_loss += 4.0 * reg
 
         return {'kl_loss': kl_loss}

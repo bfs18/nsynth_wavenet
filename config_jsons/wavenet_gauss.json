@@ -11,8 +11,9 @@
   "use_mu_law": false,
   "loss_type": "gauss",
   "use_weight_norm": false,
-  "add_noise": false,
   "double_gate_width": false,
   "use_resize_conv": false,
-  "upsample_act": "tanh"
+  "upsample_act": "leaky_relu",
+  "dropout_inputs": false,
+  "use_input_noise": true
 }

@@ -89,7 +89,7 @@ def train(args):
         return callback
 
     def _model_fn(_inputs_dict):
-        encode_dict = wn.encode_signal(_inputs_dict, add_noise)
+        encode_dict = wn.encode_signal(_inputs_dict)
         _inputs_dict.update(encode_dict)
         ff_dict = wn.feed_forward(_inputs_dict)
         ff_dict.update(encode_dict)

@@ -7,9 +7,10 @@
   "width": 64,
   "deconv_width": 256,
   "deconv_config": [[40, 10], [80, 20]],
-  "use_mu_law": true,
+  "use_mu_law": false,
   "loss_type": "gauss",
   "use_weight_norm": false,
   "use_resize_conv": false,
-  "power_loss_factor": 1.0
+  "power_loss_factor": 1.0,
+  "upsample_act": "leaky_relu"
 }

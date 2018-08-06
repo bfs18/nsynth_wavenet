@@ -14,6 +14,7 @@ DEFAULT_LR_SCHEDULE = {
     240000: 2e-6}
 ################################################################
 # use resize_conv1d instead of trans_conv1d, also change parallel wavenet.
+DETAIL_LOG = True
 
 
 class WNHelper(object):
@@ -63,6 +64,10 @@ def _deconv_stack(inputs, width, config, use_resize_conv,
             act=act,
             use_weight_norm=use_weight_norm,
             init=init)
+        if DETAIL_LOG:
+            # When using tanh, the spike of the histogram should be at 0.
+            hist_name = '{}/mel_en_{}'.format(name, i) if name else 'mel_en_{}'.format(i)
+            tf.summary.histogram(hist_name, mel_en)
     mel_en.set_shape([b, l * frame_shift, width])
     return mel_en
 
@@ -100,6 +105,9 @@ class Wavenet(object):
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
         self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
+        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
+        self.use_input_noise = getattr(self.hparams, 'use_input_noise', False)
+        assert not (self.dropout_inputs and self.use_input_noise)
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
         self.use_mu_law = self.hparams.use_mu_law
@@ -138,7 +146,7 @@ class Wavenet(object):
                                init=init)
         return {'encoding': mel_en}
 
-    def encode_signal(self, inputs, add_noise=False):
+    def encode_signal(self, inputs):
         ###
         # Encode the source with 8-bit Mu-Law or just use 16-bit signal.
         ###
@@ -156,10 +164,6 @@ class Wavenet(object):
             x_scaled = x
             real_targets = x
             cate_targets = tf.cast(x_quantized, tf.int32) + tf.cast(quant_chann / 2., tf.int32)
-
-        if add_noise:
-            # only used when the wavenet is trained as a teacher.
-            x_scaled += tf.random_normal(shape=x_scaled.get_shape(), mean=0.0, stddev=0.1)
 
         return {'wav_scaled': x_scaled,
                 'real_targets': real_targets,
@@ -183,6 +187,8 @@ class Wavenet(object):
         width = self.hparams.width
         skip_width = self.hparams.skip_width
         out_width = self.out_width
+        dropout_inputs = self.dropout_inputs
+        use_input_noise = self.use_input_noise
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
         gate_width = 2 * width if self.double_gate_width else width
@@ -204,6 +210,12 @@ class Wavenet(object):
         ###
         # The WaveNet Decoder.
         ###
+        if use_input_noise and not init:
+            x_scaled += tf.random_normal(shape=x_scaled.get_shape(),
+                                         mean=0.0, stddev=0.1)
+        if dropout_inputs and not init:
+            x_scaled = tf.layers.dropout(x_scaled, rate=0.5, training=True)
+
         l = masked.shift_right(x_scaled)
         l = masked.conv1d(
             l, num_filters=width, filter_length=filter_length, name='startconv',
@@ -275,6 +287,11 @@ class Wavenet(object):
             loss = loss_func.mol_loss(out, real_targets, quant_chann)
         elif loss_type == 'gauss':
             loss = loss_func.gauss_loss(out, real_targets)
+            if DETAIL_LOG:
+                mean, std = loss_func.mean_std_from_out_params(out, use_log_scales=True)
+                tf.summary.histogram('mean', mean)
+                tf.summary.histogram('std', std)
+                tf.summary.histogram('log_std', tf.log(std))
         else:
             raise ValueError('[{}] loss is not supported.'.format(loss_type))
         return {'loss': loss}
@@ -324,13 +341,15 @@ class Fastgen(object):
                 num_filters=gate_width,
                 filter_length=1,
                 name=cond_layer_name,
-                use_weight_norm=use_weight_norm)
+                use_weight_norm=use_weight_norm,
+                dropout_rate=0.0)
         cond_var_dict['mel_cond_out1'] = masked.conv1d(
             mel_en,
             num_filters=skip_width,
             filter_length=1,
             name='mel_cond_out1',
-            use_weight_norm=use_weight_norm)
+            use_weight_norm=use_weight_norm,
+            dropout_rate=0.0)
         return cond_var_dict
 
     def sample(self, inputs):
@@ -376,7 +395,7 @@ class Fastgen(object):
         # The WaveNet Decoder.
         ###
         l = x_scaled
-        l, inits, pushs = utils.causal_linear(
+        l, inits, pushs = masked.causal_linear(
             x=l,
             n_inputs=1,
             n_outputs=width,
@@ -392,15 +411,15 @@ class Fastgen(object):
             push_ops.append(push)
 
         # Set up skip connections.
-        s = utils.linear(l, width, skip_width, name='skip_start',
-                         use_weight_norm=use_weight_norm)
+        s = masked.linear(l, width, skip_width, name='skip_start',
+                          use_weight_norm=use_weight_norm)
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
             dilation = 2 ** (i % num_stages)
 
             # dilated masked cnn
-            d, inits, pushs = utils.causal_linear(
+            d, inits, pushs = masked.causal_linear(
                 x=l,
                 n_inputs=width,
                 n_outputs=gate_width,
@@ -416,7 +435,7 @@ class Fastgen(object):
                 push_ops.append(push)
 
             # local conditioning
-            d += utils.linear(
+            d += masked.linear(
                 mel_en, deconv_width, gate_width, name='mel_cond_%d' % (i + 1),
                 use_weight_norm=use_weight_norm)
 
@@ -426,21 +445,21 @@ class Fastgen(object):
             d = tf.sigmoid(d[:, :, :m]) * tf.tanh(d[:, :, m:])
 
             # residuals
-            l += utils.linear(d, gate_width // 2, width, name='res_%d' % (i + 1),
-                              use_weight_norm=use_weight_norm)
+            l += masked.linear(d, gate_width // 2, width, name='res_%d' % (i + 1),
+                               use_weight_norm=use_weight_norm)
 
             # skips
-            s += utils.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1),
-                              use_weight_norm=use_weight_norm)
+            s += masked.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1),
+                               use_weight_norm=use_weight_norm)
 
         s = tf.nn.relu(s)
-        s = (utils.linear(s, skip_width, skip_width, name='out1',
-                          use_weight_norm=use_weight_norm) +
-             utils.linear(mel_en, deconv_width, skip_width, name='mel_cond_out1',
-                          use_weight_norm=use_weight_norm))
+        s = (masked.linear(s, skip_width, skip_width, name='out1',
+                           use_weight_norm=use_weight_norm) +
+             masked.linear(mel_en, deconv_width, skip_width, name='mel_cond_out1',
+                           use_weight_norm=use_weight_norm))
         s = tf.nn.relu(s)
-        out = utils.linear(s, skip_width, out_width, name='out2',
-                           use_weight_norm=use_weight_norm)  # [batch_size, 1, out_width]
+        out = masked.linear(s, skip_width, out_width, name='out2',
+                            use_weight_norm=use_weight_norm)  # [batch_size, 1, out_width]
 
         if loss_type == 'ce':
             sample = loss_func.ce_sample(out, quant_chann)

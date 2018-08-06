@@ -46,6 +46,16 @@ def get_config_srt(hparams, model, tag=''):
     else:
         cstr += '-TS'
 
+    if getattr(hparams, 'use_input_noise', False):
+        cstr += '-IN'
+    else:
+        cstr += '-n_IN'
+
+    if getattr(hparams, 'dropout_inputs', False):
+        cstr += '-DO'
+    else:
+        cstr += '-n_DO'
+
     upsample_act = getattr(hparams, 'upsample_act', 'tanh')
     cstr += ('-' + upsample_act)
 

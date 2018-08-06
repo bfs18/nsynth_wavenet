@@ -164,7 +164,8 @@ def conv1d(x,
            kernel_initializer=tf.random_normal_initializer(0, 0.05),
            biases_initializer=tf.constant_initializer(0.0),
            use_weight_norm=False,
-           init=False):
+           init=False,
+           dropout_rate=0.0):
     """Fast 1D convolution that supports causal padding and dilation.
 
     Args:
@@ -178,6 +179,7 @@ def conv1d(x,
       biases_initializer: The biases initialization function.
       use_weight_norm: use weight normalization or not.
       init: run data dependent initialization for g and b.
+      dropout_rate: ues dropout
 
     Returns:
       y: The output of the 1D convolution.
@@ -226,6 +228,10 @@ def conv1d(x,
     y = tf.reshape(y, [y_shape[0], y_shape[2], num_filters])
     y = batch_to_time(y, dilation)
     y.set_shape([batch_size, length, num_filters])
+
+    if dropout_rate > 0.0:
+        y = tf.layers.dropout(y, rate=dropout_rate, training=True)
+
     return y
 
 
@@ -316,6 +322,89 @@ def resize_conv1d(x,
                init=init)
     if activation:
         y = activation(y)
+    return y
+
+
+# ---------------------------------------------------
+# Inference functions
+# ---------------------------------------------------
+def causal_linear(x, n_inputs, n_outputs, name, filter_length, rate,
+                  batch_size, use_weight_norm=False):
+    """Applies dilated convolution using queues.
+
+    Assumes a filter_length of 3.
+
+    Args:
+      x: The [mb, time, channels] tensor input.
+      n_inputs: The input number of channels.
+      n_outputs: The output number of channels.
+      name: The variable scope to provide to W and biases.
+      filter_length: The length of the convolution, assumed to be 3.
+      rate: The rate or dilation
+      batch_size: Non-symbolic value for batch_size.
+      use_weight_norm: use weight normalization or not
+
+    Returns:
+      y: The output of the operation
+      (init_1, init_2): Initialization operations for the queues
+      (push_1, push_2): Push operations for the queues
+    """
+    assert filter_length == 3
+
+    # create queue
+    q_1 = tf.FIFOQueue(rate, dtypes=tf.float32, shapes=(batch_size, 1, n_inputs))
+    q_2 = tf.FIFOQueue(rate, dtypes=tf.float32, shapes=(batch_size, 1, n_inputs))
+    init_1 = q_1.enqueue_many(tf.zeros((rate, batch_size, 1, n_inputs)))
+    init_2 = q_2.enqueue_many(tf.zeros((rate, batch_size, 1, n_inputs)))
+    state_1 = q_1.dequeue()
+    push_1 = q_1.enqueue(x)
+    state_2 = q_2.dequeue()
+    push_2 = q_2.enqueue(state_1)
+
+    # get pretrained weights
+    with tf.variable_scope(name):
+        w = get_kernel(
+            kernel_shape=[1, filter_length, n_inputs, n_outputs],
+            name='W', initializer=None, use_weight_norm=use_weight_norm)
+        b = tf.get_variable(
+            name="biases", shape=[n_outputs], dtype=tf.float32)
+
+    w_q_2 = tf.slice(w, [0, 0, 0, 0], [-1, 1, -1, -1])
+    w_q_1 = tf.slice(w, [0, 1, 0, 0], [-1, 1, -1, -1])
+    w_x = tf.slice(w, [0, 2, 0, 0], [-1, 1, -1, -1])
+
+    # perform op w/ cached states
+    y = tf.nn.bias_add(
+        tf.matmul(state_2[:, 0, :], w_q_2[0][0]) + tf.matmul(
+            state_1[:, 0, :], w_q_1[0][0]) + tf.matmul(x[:, 0, :], w_x[0][0]), b)
+
+    y = tf.expand_dims(y, 1)
+
+    return y, (init_1, init_2), (push_1, push_2)
+
+
+def linear(x, n_inputs, n_outputs, name, use_weight_norm=False):
+    """Simple linear layer.
+
+    Args:
+      x: The [mb, time, channels] tensor input.
+      n_inputs: The input number of channels.
+      n_outputs: The output number of channels.
+      name: The variable scope to provide to W and biases.
+      use_weight_norm: use weight normalization or not.
+
+    Returns:
+      y: The output of the operation.
+    """
+    with tf.variable_scope(name):
+        w = get_kernel(
+            kernel_shape=[1, 1, n_inputs, n_outputs],
+            name='W', initializer=None, use_weight_norm=use_weight_norm)
+        b = tf.get_variable(
+            name="biases", shape=[n_outputs], dtype=tf.float32)
+    y = tf.nn.bias_add(tf.matmul(x[:, 0, :], w[0][0]), b)
+    y = tf.expand_dims(y, 1)
+
     return y
 
 

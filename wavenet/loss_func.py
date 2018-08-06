@@ -189,7 +189,8 @@ def mol_sample(mol_params, quant_chann, use_log_scales=True):
 def gauss_sample(gauss_params, quant_chann, use_log_scales=True):
     mean, std = mean_std_from_out_params(gauss_params, use_log_scales)
     distribution = Normal(loc=mean, scale=std)
-    x = distribution.sample()
+    # x = distribution.sample()
+    x = mean
     x = tf.clip_by_value(x, -1., 1. - 2. / quant_chann)
     x_quantized = utils.cast_quantize(x, quant_chann)
     return x_quantized
