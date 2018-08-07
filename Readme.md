@@ -70,8 +70,11 @@ The arguments are quite self-evident.
 Pre-trained models:
 
 wavenet model: [ns_wn-eval.tar.gz](https://drive.google.com/open?id=1P-ICvPuakLIliXlD6y7IL2lykA5Gys4T)  
-Please set DOUBLE_GATE_WIDTH=True in wavenet/wavenet.py when using ns_wn-eval.  
-parallel wavenet model: [ns_pwn-eval.tar.gz](https://drive.google.com/open?id=13rHT6zr2sXeedmjUOpp6IVQdT30cy66_)  
+&nbsp;&nbsp;&nbsp;&nbsp;Set DOUBLE_GATE_WIDTH=True in wavenet/wavenet.py when using ns_wn-eval.  
+Clarinet teacher model: [ns_wn-gauss-eval.tar.gz](https://drive.google.com/open?id=1NBOBqilLwxu3G94nDQaKREHDU_TK_96A)  
+parallel wavenet model: [ns_pwn-eval.tar.gz](https://drive.google.com/open?id=17bt6laBcTcjZCsLUzdTjtaH2hQQyki8E)    
+parallel wavenet model with contrastive loss: [ns_pwn-eval-2.tar.gz](https://drive.google.com/open?id=1AtofQdXbSutb-_ZWFeA_I17NR2i8nUC7)  
+Clarinet vocoder model: [ns_pwn-gauss-eval.tar.gz](https://drive.google.com/open?id=1I3vZPmKlcXUxGCrVJnErGzYEo87tRZ9o)  
 The pre-trained models are trained on [LJSpeech](https://keithito.com/LJ-Speech-Dataset/) dataset. 
 The package contains the checkpoint and the confing json file.
 
@@ -92,13 +95,15 @@ The following examples are more of functional test than gaining good waves. The 
     * [OK] use_mu_law + ce [LJ001-0001](tests/pred_data-use_mu_law+ce/gen_LJ001-0001.wav) | [LJ001-0002](tests/pred_data-use_mu_law+ce/gen_LJ001-0002.wav)
     * [OK] use_mu_law + mol [LJ001-0001](tests/pred_data-use_mu_law+mol/gen_LJ001-0001.wav) | [J001-0002](tests/pred_data-use_mu_law+mol/gen_LJ001-0002.wav)
     * [OK] no_mu_law + mol [LJ001-0001](tests/pred_data-no_mu_law+mol/gen_LJ001-0001.wav) | [LJ001-0002](tests/pred_data-no_mu_law+mol/gen_LJ001-0002.wav)
-    * [OK] no_mu_law + gauss [LJ001-0001](tests/pred_data-no_mu_law+gauss/gen_LJ001-0001-sample.wav) |
+    * [OK] no_mu_law + gauss (Clarinet teacher) [LJ001-0001](tests/pred_data-no_mu_law+gauss/gen_LJ001-0001-sample.wav) |
                              [LJ001-0002](tests/pred_data-no_mu_law+gauss/gen_LJ001-0001-sample.wav) 
 * tune parallel wavenet 
     * use_mu_law
-    * no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_pow.wav)
-                [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav) 
-                [A better case](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_abs.wav)
+    * [OK] no_mu_law [Failed case 1](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_pow.wav) |
+                     [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav) |
+                     [A better case](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_abs.wav) |
+                     [with contrastive loss](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-cl.wav) |
+                     [Clarinet Vocoder](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-gauss.wav)
                 
 The power loss defination is important, the failed case 1 use `pow(abs(stft(y)))` as mean square error input, 
 the failed case 2 use `log(abs(stft(y)))`. The are both noisy, but the noises are of different type.

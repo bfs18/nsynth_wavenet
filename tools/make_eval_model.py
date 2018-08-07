@@ -1,7 +1,8 @@
 import os
 import argparse
-import shutil
+import glob
 import tensorflow as tf
+import shutil
 
 
 def save_eval_model(ckpt_dir, save_dir):
@@ -25,13 +26,17 @@ def save_eval_model(ckpt_dir, save_dir):
         sess.run(tf.global_variables_initializer())
         saver.save(sess, save_ckpt_path, write_meta_graph=False, write_state=False)
 
-    os.system('cp {}/*.json {}'.format(ckpt_dir, save_dir))
-    os.system('cp {}/checkpoint {}'.format(ckpt_dir, save_dir))
+    with open('{}/checkpoint'.format(save_dir), 'wt', encoding='utf-8') as F:
+        F.write('model_checkpoint_path: "{}"'.format(
+            os.path.basename(ckpt.model_checkpoint_path)))
+
+    json_file = glob.glob(os.path.join(ckpt_dir, "*.json"))[0]
+    shutil.copy(json_file, save_dir)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ckpt_dir')
-    parser.add_argument('--save_dir')
+    parser.add_argument('--ckpt_dir', required=True)
+    parser.add_argument('--save_dir', required=True)
     args = parser.parse_args()
     save_eval_model(args.ckpt_dir, args.save_dir)
