@@ -103,7 +103,8 @@ The following examples are more of functional test than gaining good waves. The 
                      [Failed case 2](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_log.wav) |
                      [A better case](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-stft_abs.wav) |
                      [with contrastive loss](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-cl.wav) |
-                     [Clarinet Vocoder](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-gauss.wav)
+                     [Clarinet Vocoder](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-gauss.wav) |
+                     [Share deconv stack](tests/pred_data-pwn-failed_cases/gen_LJ001-0001-share_deconv.wav)
                 
 The power loss defination is important, the failed case 1 use `pow(abs(stft(y)))` as mean square error input, 
 the failed case 2 use `log(abs(stft(y)))`. The are both noisy, but the noises are of different type.
