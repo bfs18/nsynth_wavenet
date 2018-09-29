@@ -146,7 +146,9 @@ def get_kernel(kernel_shape, initializer, name,
             '{}_V'.format(name), shape=kernel_shape, initializer=initializer)
         g = tf.get_variable(
             '{}_g'.format(name),
-            initializer=l2_norm(V.initialized_value(), axis=norm_axis, keep_dims=False))
+            shape=[out_dim],
+            initializer=(lambda shape, dtype, partition_info:
+                         l2_norm(V.initialized_value(), axis=norm_axis, keep_dims=False)))
         V_norm = tf.nn.l2_normalize(V, axis=norm_axis)
         weights = V_norm * tf.reshape(g, shape=g_bc_shape)
     else:
@@ -164,8 +166,7 @@ def conv1d(x,
            kernel_initializer=tf.random_normal_initializer(0, 0.05),
            biases_initializer=tf.constant_initializer(0.0),
            use_weight_norm=False,
-           init=False,
-           dropout_rate=0.0):
+           init=False):
     """Fast 1D convolution that supports causal padding and dilation.
 
     Args:
@@ -179,7 +180,6 @@ def conv1d(x,
       biases_initializer: The biases initialization function.
       use_weight_norm: use weight normalization or not.
       init: run data dependent initialization for g and b.
-      dropout_rate: ues dropout
 
     Returns:
       y: The output of the 1D convolution.
@@ -228,9 +228,6 @@ def conv1d(x,
     y = tf.reshape(y, [y_shape[0], y_shape[2], num_filters])
     y = batch_to_time(y, dilation)
     y.set_shape([batch_size, length, num_filters])
-
-    if dropout_rate > 0.0:
-        y = tf.layers.dropout(y, rate=dropout_rate, training=True)
 
     return y
 

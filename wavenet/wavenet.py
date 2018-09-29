@@ -64,7 +64,7 @@ def _deconv_stack(inputs, width, config, use_resize_conv,
             act=act,
             use_weight_norm=use_weight_norm,
             init=init)
-        if DETAIL_LOG:
+        if DETAIL_LOG and not init:
             # When using tanh, the spike of the histogram should be at 0.
             hist_name = '{}/mel_en_{}'.format(name, i) if name else 'mel_en_{}'.format(i)
             tf.summary.histogram(hist_name, mel_en)
@@ -107,6 +107,7 @@ class Wavenet(object):
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
         self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
         self.use_input_noise = getattr(self.hparams, 'use_input_noise', False)
+        self.use_as_teacher = getattr(self.hparams, 'use_as_teacher', False)
         assert not (self.dropout_inputs and self.use_input_noise)
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
@@ -189,6 +190,7 @@ class Wavenet(object):
         out_width = self.out_width
         dropout_inputs = self.dropout_inputs
         use_input_noise = self.use_input_noise
+        use_as_teacher = self.use_as_teacher
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
         gate_width = 2 * width if self.double_gate_width else width
@@ -213,18 +215,20 @@ class Wavenet(object):
         if use_input_noise and not init:
             x_scaled += tf.random_normal(shape=x_scaled.get_shape(),
                                          mean=0.0, stddev=0.1)
-        if dropout_inputs and not init:
-            x_scaled = tf.layers.dropout(x_scaled, rate=0.5, training=True)
-
         l = masked.shift_right(x_scaled)
         l = masked.conv1d(
-            l, num_filters=width, filter_length=filter_length, name='startconv',
+            l, num_filters=width, filter_length=filter_length, name='conv_start',
             use_weight_norm=use_weight_norm, init=init)
 
         # Set up skip connections.
         s = masked.conv1d(
             l, num_filters=skip_width, filter_length=1, name='skip_start',
             use_weight_norm=use_weight_norm, init=init)
+
+        if dropout_inputs and not init:
+            dropout_training = not use_as_teacher
+            l = tf.layers.dropout(l, rate=0.5, training=dropout_training, name='conv_dropout')
+            s = tf.layers.dropout(s, rate=0.5, training=dropout_training, name='skip_dropout')
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -305,10 +309,11 @@ class Fastgen(object):
         self.batch_size = batch_size
         self.hparams = hparams
 
-        self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.use_mu_law = self.hparams.use_mu_law
         self.loss_type = self.hparams.loss_type
+        self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
+        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -373,6 +378,7 @@ class Fastgen(object):
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
         gate_width = 2 * width if self.double_gate_width else width
+        dropout_inputs = self.dropout_inputs
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
@@ -397,7 +403,7 @@ class Fastgen(object):
             x=l,
             n_inputs=1,
             n_outputs=width,
-            name='startconv',
+            name='conv_start',
             rate=1,
             batch_size=batch_size,
             filter_length=filter_length,
@@ -411,6 +417,10 @@ class Fastgen(object):
         # Set up skip connections.
         s = masked.linear(l, width, skip_width, name='skip_start',
                           use_weight_norm=use_weight_norm)
+
+        if dropout_inputs:
+            l = tf.layers.dropout(l, rate=0.5, training=False, name='conv_dropout')
+            s = tf.layers.dropout(s, rate=0.5, training=False, name='skip_dropout')
 
         # Residual blocks with skip connections.
         for i in range(num_layers):

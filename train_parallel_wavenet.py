@@ -34,6 +34,7 @@ def train(args):
     with open(te_json, 'rt') as F:
         configs = json.load(F)
     te_hparams = Namespace(**configs)
+    setattr(te_hparams, 'use_as_teacher', True)
     teacher = wavenet.Wavenet(te_hparams)
 
     ###

@@ -186,6 +186,17 @@ def mol_sample(mol_params, quant_chann, use_log_scales=True):
     return x_quantized
 
 
+def mol_sample_(mol_params, quant_chann, use_log_scales=True):
+    logit_probs, means, scale_params = tf.split(
+        mol_params, num_or_size_splits=3, axis=2)
+    nr_mix = mol_params.get_shape().as_list()[2] // 3
+    sel = tf.one_hot(tf.argmax(logit_probs, axis=2), depth=nr_mix, dtype=tf.float32)
+    x = tf.reduce_sum(means * sel, axis=2)
+    x = tf.clip_by_value(x, -1., 1. - 2. / quant_chann)
+    x_quantized = utils.cast_quantize(x, quant_chann)
+    return x_quantized
+
+
 def gauss_sample(gauss_params, quant_chann, use_log_scales=True):
     mean, std = mean_std_from_out_params(gauss_params, use_log_scales)
     distribution = Normal(loc=mean, scale=std)

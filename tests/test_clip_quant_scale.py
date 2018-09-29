@@ -35,3 +35,9 @@ inv_mu_law_path = 'test_data/test-inv_mu_law.wav'
 inv_quant_path = 'test_data/test-inv_quant.wav'
 librosa.output.write_wav(inv_mu_law_path, inv_mu_law_audio, sr=16000)
 librosa.output.write_wav(inv_quant_path, inv_quant_audio, sr=16000)
+
+
+audio, _ = librosa.load('test_data/test.wav', sr=16000)
+audio_int = utils.cast_quantize_numpy(audio, 2 ** 8)
+audio_ = utils.inv_mu_law_numpy(audio_int)
+librosa.output.write_wav('test_data/test_inv.wav', audio_, sr=16000)

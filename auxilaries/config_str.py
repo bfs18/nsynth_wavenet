@@ -14,6 +14,7 @@ def get_config_srt(hparams, model, tag=''):
         model_str = 'pwn'
     else:
         raise ValueError('unsupported model type {}'.format(model))
+    model_str = '{}_{}'.format(model_str, tag) if tag else model_str
 
     branch_names = subprocess.check_output(['git', 'branch'])
     current_branch_name = [bn for bn in branch_names.decode('utf-8').split('\n')
@@ -45,16 +46,6 @@ def get_config_srt(hparams, model, tag=''):
         cstr += '-RS'
     else:
         cstr += '-TS'
-
-    if getattr(hparams, 'use_input_noise', False):
-        cstr += '-IN'
-    else:
-        cstr += '-n_IN'
-
-    if getattr(hparams, 'dropout_inputs', False):
-        cstr += '-DO'
-    else:
-        cstr += '-n_DO'
 
     upsample_act = getattr(hparams, 'upsample_act', 'tanh')
     cstr += ('-' + upsample_act)
@@ -96,14 +87,21 @@ def get_config_srt(hparams, model, tag=''):
         else:
             cstr += '-n_PFS'
 
-    if model == 'wavenet' and getattr(hparams, 'add_noise', False):
-        cstr += '-NOISE'
+        if getattr(hparams, 'use_share_deconv', False):
+            cstr += '-share_deconv'
+    else:
+        if getattr(hparams, 'use_input_noise', False):
+            cstr += '-IN'
+        else:
+            cstr += '-n_IN'
+
+        if getattr(hparams, 'dropout_inputs', False):
+            cstr += '-DO'
+        else:
+            cstr += '-n_DO'
 
     if loss_type:
         cstr += '-{}'.format(loss_type)
-
-    if tag:
-        cstr += '-{}'.format(tag)
 
     return cstr
 

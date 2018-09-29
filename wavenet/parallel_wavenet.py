@@ -18,7 +18,7 @@ NORM_FEAT = False
 # ###########################################
 # modify to fine-tune
 # ###########################################
-USE_PRIORITY_FREQ = False
+USE_PRIORITY_FREQ = True
 USE_L1_LOSS = False
 # 0 for log; 1 for abs; 2 for pow; 3 for combine
 SPEC_ENHANCE_FACTOR = 1
@@ -125,6 +125,7 @@ class ParallelWavenet(object):
         self.wave_length = self.hparams.wave_length
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
+        self.use_share_deconv = getattr(self.hparams, 'use_share_deconv', False)
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
         self.loss_type = getattr(self.hparams, 'loss_type', 'logistic')
         if self.use_mu_law:
@@ -164,29 +165,40 @@ class ParallelWavenet(object):
         rn = normal_0_1.sample([batch_size, length])
         return rn
 
+    def deconv_stack(self, mel_inputs, name='', init=False):
+        mel = mel_inputs['mel']
+        deconv_width = self.hparams.deconv_width
+        deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
+        upsample_act = self.upsample_act
+        use_resize_conv = self.use_resize_conv
+        use_weight_norm = self.use_weight_norm
+
+        mel_en = wavenet._deconv_stack(
+            mel, deconv_width, deconv_config,
+            act=upsample_act, use_resize_conv=use_resize_conv, name=name,
+            use_weight_norm=use_weight_norm, init=init)
+        return {'encoding': mel_en}
+
     def _create_iaf(self, inputs, iaf_idx, init):
         num_stages = self.hparams.num_stages
         num_layers = self.hparams.num_iaf_layers[iaf_idx]
         filter_length = self.hparams.filter_length
         width = self.hparams.width
         out_width = self.out_width
-        deconv_width = self.hparams.deconv_width
-        deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         use_weight_norm = self.use_weight_norm
-        use_resize_conv = self.use_resize_conv
-        upsample_act = self.upsample_act
+        use_share_deconv = self.use_share_deconv
         gate_width = width
         final_init, final_bias = PWNHelper.manual_finit_or_not_fn(init, iaf_idx)
 
-        mel = inputs['mel']
         x = inputs['x']
+        mel = inputs['mel']
 
         iaf_name = 'iaf_{:d}'.format(iaf_idx + 1)
 
-        mel_en = wavenet._deconv_stack(
-            mel, deconv_width, deconv_config,
-            act=upsample_act, use_resize_conv=use_resize_conv, name=iaf_name,
-            use_weight_norm=use_weight_norm, init=init)
+        if use_share_deconv:
+            mel_en = inputs['encoding']
+        else:
+            mel_en = self.deconv_stack({'mel': mel}, name=iaf_name, init=init)['encoding']
 
         l = masked.shift_right(x)
         l = masked.conv1d(l, num_filters=width, filter_length=filter_length,
@@ -245,7 +257,7 @@ class ParallelWavenet(object):
         scale, log_scale = PWNHelper.scale_log_scale_fn(scale_params)
         new_x = x * scale + mean
 
-        if DETAIL_LOG:
+        if DETAIL_LOG and not init:
             tf.summary.scalar('scale_{}'.format(iaf_idx), tf.reduce_mean(scale))
             tf.summary.scalar('log_scale_{}'.format(iaf_idx), tf.reduce_mean(log_scale))
             tf.summary.scalar('mean_{}'.format(iaf_idx), tf.reduce_mean(mean))
@@ -261,6 +273,7 @@ class ParallelWavenet(object):
         deconv_config = self.hparams.deconv_config  # [[l1, s1], [l2, s2]]
         frame_shift = int(np.prod([dc[1] for dc in deconv_config]))
         max_dilation = 2 ** (num_stages - 1)
+        use_share_deconv = self.use_share_deconv
 
         mel = inputs['mel']
 
@@ -274,8 +287,15 @@ class ParallelWavenet(object):
 
         iaf_x = tf.expand_dims(x, axis=2)
         mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
+
+        if use_share_deconv:
+            mel_en = self.deconv_stack({'mel': mel}, name='iaf_share', init=init)['encoding']
+        else:
+            mel_en = None
+
         for iaf_idx in range(num_iafs):
-            iaf_dict = self._create_iaf({'mel': mel, 'x': iaf_x}, iaf_idx, init=init)
+            iaf_dict = self._create_iaf(
+                {'mel': mel, 'x': iaf_x, 'encoding': mel_en}, iaf_idx, init=init)
             iaf_x = iaf_dict['x']
             scale = iaf_dict['scale']
             log_scale = iaf_dict['log_scale']
@@ -289,7 +309,7 @@ class ParallelWavenet(object):
         # new_x = tf.squeeze(iaf_x, axis=2)
         new_x = x * scale_tot + mean_tot
 
-        if DETAIL_LOG:
+        if DETAIL_LOG and not init:
             tf.summary.scalar('new_x', tf.reduce_mean(new_x))
             tf.summary.scalar('new_x_std', utils.reduce_std(new_x))
             tf.summary.scalar('new_x_abs', tf.reduce_mean(tf.abs(new_x)))

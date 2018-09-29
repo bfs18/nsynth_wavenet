@@ -1,4 +1,5 @@
 import tensorflow as tf
+import time
 
 from wavenet import parallel_wavenet, fastgen
 
@@ -27,6 +28,12 @@ def synthesis(hparams, mel, save_paths, checkpoint_path):
         saver = tf.train.Saver(shadow_var_dict, reshape=True)
         saver.restore(sess, checkpoint_path)
 
+        start = time.time()
         audio = sess.run(fg_dict['x'],
                          feed_dict={fg_dict['mel_in']: mel})
+        cost = time.time() - start
+        wave_length = audio.shape[1] / 16000
+        tf.logging.info('Target waveform length {:.5f}, ' 
+                        'Session run consume {:.5f} secs, '
+                        'Delay {:.2f}'.format(wave_length, cost, cost / wave_length))
     fastgen.save_batch(audio, save_paths)

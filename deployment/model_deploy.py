@@ -437,7 +437,12 @@ def _sum_clones_gradients(clone_grads):
                 grads.append(g)
         if grads:
             if len(grads) > 1:
-                sum_grad = tf.add_n(grads, name=var.op.name + '/sum_grads')
+                if isinstance(grads[0], tf.IndexedSlices):
+                    values = tf.concat([g.values for g in grads], axis=0)
+                    indices = tf.concat([g.indices for g in grads], axis=0)
+                    sum_grad = tf.IndexedSlices(values, indices)
+                else:
+                    sum_grad = tf.add_n(grads, name=var.op.name + '/sum_grads')
             else:
                 sum_grad = grads[0]
             sum_grads.append((sum_grad, var))

@@ -48,10 +48,6 @@ def train(args):
     tf.logging.info('Saving to {}'.format(logdir))
 
     wn = wavenet.Wavenet(hparams, os.path.abspath(os.path.expanduser(args.train_path)))
-    # At training, wavenet never see the output values of parallel wavenet
-    # if clip_quant_scale is not used in parallel wavenet.
-    # Add noise to wavenet input to remedy this.
-    add_noise = getattr(hparams, 'add_noise', False)
 
     def _data_dep_init():
         # slim.learning.train runs init_fn earlier than start_queue_runner
