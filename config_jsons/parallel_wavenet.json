@@ -1,6 +1,4 @@
 {
-  "lr_schedule": [[0, 1e-4], [90000, 6e-5], [120000, 4e-5],
-                  [150000, 2e-5], [180000, 6e-6], [210000, 2e-6]],
   "num_iters": 200000,
   "wave_length": 7680,
   "num_stages": 10,
@@ -10,7 +8,12 @@
   "deconv_width": 256,
   "deconv_config": [[40, 10], [80, 20]],
   "use_mu_law": false,
-  "use_weight_norm": true,
+  "loss_type": "logistic",
+  "use_weight_norm": false,
+  "use_resize_conv": false,
+  "use_share_deconv": false,
+  "use_teacher_deconv": true,
   "num_samples": 100,
-  "power_loss_factor": 1.0
+  "power_loss_factor": 1.0,
+  "contrastive_loss_factor": 0.3
 }
