@@ -88,7 +88,11 @@ def get_config_srt(hparams, model, tag=''):
             cstr += '-n_PFS'
 
         if getattr(hparams, 'use_share_deconv', False):
-            cstr += '-share_deconv'
+            cstr += '-SHA_DC'
+        elif getattr(hparams, 'use_teacher_deconv', False):
+            cstr += '-TEA_DC'
+        else:
+            cstr += '-SEP_DC'
     else:
         if getattr(hparams, 'use_input_noise', False):
             cstr += '-IN'

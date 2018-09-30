@@ -4,6 +4,10 @@ import time
 from wavenet import parallel_wavenet, fastgen
 
 
+def get_default_shadow_dict(tf_vars):
+    return {var.name[:-2]: var for var in tf_vars}
+
+
 def load_parallelgen(hparams, batch_size=1, length=7680, num_mel=80):
     pw = parallel_wavenet.ParallelWavenet(hparams)
     quant_chann = pw.quant_chann
@@ -24,8 +28,16 @@ def synthesis(hparams, mel, save_paths, checkpoint_path):
 
         # model use ExponentialMovingAverage
         tf_vars = tf.trainable_variables()
-        shadow_var_dict = fastgen.get_ema_shadow_dict(tf_vars)
-        saver = tf.train.Saver(shadow_var_dict, reshape=True)
+        pw = parallel_wavenet.ParallelWavenet(hparams)
+        filtered_tf_vars = pw.filter_update_variables(tf_vars)
+        if len(filtered_tf_vars) != len(tf_vars):
+            deconv_vars = list(set(tf_vars) - set(filtered_tf_vars))
+            default_var_dict = get_default_shadow_dict(deconv_vars)
+            ema_var_dict = fastgen.get_ema_shadow_dict(filtered_tf_vars)
+            var_dict = {**default_var_dict, **ema_var_dict}
+        else:
+            var_dict = fastgen.get_ema_shadow_dict(tf_vars)
+        saver = tf.train.Saver(var_dict, reshape=True)
         saver.restore(sess, checkpoint_path)
 
         start = time.time()

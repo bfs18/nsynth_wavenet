@@ -84,6 +84,38 @@ def train(args):
             tf.logging.info('Done Calculate initial statistics.')
         return callback
 
+    def _trans_conv_init_from_teacher(te_vars, st_vars):
+        """
+        Initialize the separate iaf transposed convolution stacks or shared transposed
+        convolution stack with the teacher's transposed convolution stack.
+        """
+        te_trans_conv_var_names = [var.name for var in te_vars
+                                   if pwn.upsample_conv_name in var.name]
+        te_trans_conv_vars = [var for var in te_vars
+                              if var.name in te_trans_conv_var_names]
+        st_trans_conv_vars_flow_nested = []
+        for te_tcvn in te_trans_conv_var_names:
+            st_tcv_for_flows = []
+            for var in st_vars:
+                if var.name.endswith(te_tcvn):
+                    st_tcv_for_flows.append(var)
+            st_trans_conv_vars_flow_nested.append(st_tcv_for_flows)
+
+        assert len(te_trans_conv_vars) == len(st_trans_conv_vars_flow_nested)
+
+        assign_ops = []
+        for te_tcv, st_tcv_for_flows in zip(
+                te_trans_conv_vars, st_trans_conv_vars_flow_nested):
+            for st_tcv in st_tcv_for_flows:
+                assign_ops.append(tf.assign(st_tcv, te_tcv))
+
+        def assign_fn(session):
+            tf.logging.info('Load transposed convolution weights form teacher')
+            session.run(assign_ops)
+            tf.logging.info('Done load transposed convolution weights form teacher')
+
+        return assign_fn
+
     def _model_fn(_inputs_dict):
         ff_dict = pwn.feed_forward(_inputs_dict)
         ff_dict.update(_inputs_dict)
@@ -128,7 +160,8 @@ def train(args):
         ###
         # variables to train
         ###
-        st_vars = [var for var in tf.trainable_variables() if 'iaf' in var.name]
+        st_var_list = [var for var in tf.trainable_variables() if 'iaf' in var.name]
+        filtered_st_var_list = pwn.filter_update_variables(st_var_list)
 
         with tf.device(deploy_config.optimizer_device()):
             lr = tf.constant(pwn.learning_rate_schedule[0])
@@ -140,10 +173,10 @@ def train(args):
             optimizer = tf.train.AdamOptimizer(lr, epsilon=1e-8)
             ema = tf.train.ExponentialMovingAverage(decay=0.9999, num_updates=global_step)
             loss, clone_grads_vars = model_deploy.optimize_clones(
-                clones, optimizer, var_list=st_vars)
+                clones, optimizer, var_list=filtered_st_var_list)
             update_ops.append(
                 optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
-            update_ops.append(ema.apply(st_vars))
+            update_ops.append(ema.apply(filtered_st_var_list))
 
             summaries.add(tf.summary.scalar("train_loss", loss))
 
@@ -152,17 +185,22 @@ def train(args):
                 train_tensor = tf.identity(loss, name='train_op')
 
         ###
-        # restore teacher
+        # restore teacher and other init ops
         ###
-        te_vars = [var for var in tf.trainable_variables() if 'iaf' not in var.name]
+        te_var_list = [var for var in tf.trainable_variables() if 'iaf' not in var.name]
         # teacher use EMA
-        te_vars = {'{}/ExponentialMovingAverage'.format(tv.name[:-2]): tv for tv in te_vars}
-        restore_init_fn = tf.contrib.framework.assign_from_checkpoint_fn(te_ckpt, te_vars)
+        te_var_shardow_dict = {'{}/ExponentialMovingAverage'.format(tv.name[:-2]): tv
+                               for tv in te_var_list}
+        restore_init_fn = tf.contrib.framework.assign_from_checkpoint_fn(
+            te_ckpt, te_var_shardow_dict)
         data_dep_init_fn = _data_dep_init()
+        share_trans_conv_init_fn = _trans_conv_init_from_teacher(te_var_list, st_var_list)
 
         def group_init_fn(session):
+            # the order of the init functions is important, don't change it.
             restore_init_fn(session)
             data_dep_init_fn(session)
+            share_trans_conv_init_fn(session)
 
         session_config = tf.ConfigProto(allow_soft_placement=True)
         session_config.gpu_options.allow_growth = True

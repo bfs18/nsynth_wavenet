@@ -7,15 +7,15 @@ from auxilaries import utils
 def _log_prob_from_logits(x):
     """ numerically stable log_softmax implementation that prevents overflow """
     axis = len(x.get_shape()) - 1
-    m = tf.reduce_max(x, axis, keep_dims=True)
-    return x - m - tf.log(tf.reduce_sum(tf.exp(x - m), axis, keep_dims=True))
+    m = tf.reduce_max(x, axis, keepdims=True)
+    return x - m - tf.log(tf.reduce_sum(tf.exp(x - m), axis, keepdims=True))
 
 
 def _log_sum_exp(x):
     """ numerically stable log_sum_exp implementation that prevents overflow """
     axis = len(x.get_shape()) - 1
     m = tf.reduce_max(x, axis)
-    m2 = tf.reduce_max(x, axis, keep_dims=True)
+    m2 = tf.reduce_max(x, axis, keepdims=True)
     return m + tf.log(tf.reduce_sum(tf.exp(x - m2), axis))
 
 

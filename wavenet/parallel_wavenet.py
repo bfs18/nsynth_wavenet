@@ -125,9 +125,15 @@ class ParallelWavenet(object):
         self.wave_length = self.hparams.wave_length
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
-        self.use_share_deconv = getattr(self.hparams, 'use_share_deconv', False)
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
         self.loss_type = getattr(self.hparams, 'loss_type', 'logistic')
+        # use shared deconv stack for the iaf flows, the shared deconv stack is
+        # initialized from the teacher's deconv stack.
+        self.use_share_deconv = getattr(self.hparams, 'use_share_deconv', False)
+        # use teacher's deconv stack and not update it during training the student.
+        self.use_teacher_deconv = getattr(self.hparams, 'use_teacher_deconv', False)
+        assert not (self.use_share_deconv and self.use_teacher_deconv)
+
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -150,6 +156,17 @@ class ParallelWavenet(object):
         train_path = self.train_path
         wave_length = self.wave_length
         return wavenet._get_batch(train_path, batch_size, wave_length)
+
+    @property
+    def upsample_conv_name(self):
+        upsample_conv_name = 'resize_conv' if self.use_resize_conv else 'trans_conv'
+        return upsample_conv_name
+
+    def filter_update_variables(self, vars):
+        if self.use_teacher_deconv:
+            vars = [var for var in vars
+                    if 'iaf_share/{}'.format(self.upsample_conv_name) not in var.name]
+        return vars
 
     @staticmethod
     def _logistic_0_1(batch_size, length):
@@ -187,6 +204,7 @@ class ParallelWavenet(object):
         out_width = self.out_width
         use_weight_norm = self.use_weight_norm
         use_share_deconv = self.use_share_deconv
+        use_teacher_deconv = self.use_teacher_deconv
         gate_width = width
         final_init, final_bias = PWNHelper.manual_finit_or_not_fn(init, iaf_idx)
 
@@ -195,7 +213,7 @@ class ParallelWavenet(object):
 
         iaf_name = 'iaf_{:d}'.format(iaf_idx + 1)
 
-        if use_share_deconv:
+        if use_share_deconv or use_teacher_deconv:
             mel_en = inputs['encoding']
         else:
             mel_en = self.deconv_stack({'mel': mel}, name=iaf_name, init=init)['encoding']
@@ -274,6 +292,7 @@ class ParallelWavenet(object):
         frame_shift = int(np.prod([dc[1] for dc in deconv_config]))
         max_dilation = 2 ** (num_stages - 1)
         use_share_deconv = self.use_share_deconv
+        use_teacher_deconv = self.use_teacher_deconv
 
         mel = inputs['mel']
 
@@ -288,7 +307,7 @@ class ParallelWavenet(object):
         iaf_x = tf.expand_dims(x, axis=2)
         mean_tot, scale_tot, log_scale_tot = 0., 1., 0.
 
-        if use_share_deconv:
+        if use_share_deconv or use_teacher_deconv:
             mel_en = self.deconv_stack({'mel': mel}, name='iaf_share', init=init)['encoding']
         else:
             mel_en = None
