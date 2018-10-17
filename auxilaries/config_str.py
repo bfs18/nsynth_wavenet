@@ -94,11 +94,6 @@ def get_config_srt(hparams, model, tag=''):
         else:
             cstr += '-SEP_DC'
     else:
-        if getattr(hparams, 'use_input_noise', False):
-            cstr += '-IN'
-        else:
-            cstr += '-n_IN'
-
         if getattr(hparams, 'dropout_inputs', False):
             cstr += '-DO'
         else:

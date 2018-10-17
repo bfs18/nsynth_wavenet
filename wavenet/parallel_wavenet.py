@@ -149,6 +149,7 @@ class ParallelWavenet(object):
             # There is no need for te.use_mu_law and st.use_mu_law to be consistent.
             assert teacher.use_mu_law == self.use_mu_law
             assert teacher.use_resize_conv == self.use_resize_conv
+            assert teacher.upsample_act == self.upsample_act
 
             self.stft_feat_fn = PWNHelper.stft_feat_fn
 

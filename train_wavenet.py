@@ -7,10 +7,12 @@ import glob
 from argparse import ArgumentParser, Namespace
 from wavenet import wavenet
 from deployment import model_deploy
-from auxilaries import reader, config_str
+from auxilaries import reader, config_str, enhance_log
 
 slim = tf.contrib.slim
-EXP_TAG = ''
+
+GRAD_CLIP = False
+EXP_TAG = 'GC' if GRAD_CLIP else ''
 
 
 def _init_logging(array, array_name):
@@ -19,6 +21,14 @@ def _init_logging(array, array_name):
         '{0}.min {3:.5f}, {0}.max {4:.5f}'.format(
             array_name, array.mean(), array.std(),
             array.min(), array.max()))
+
+
+def grad_clip(grads_vars, clip_norm=1.0):
+    grads = [gv[0] for gv in grads_vars]
+    variables = [gv[1] for gv in grads_vars]
+    clipped_grads, _ = tf.clip_by_global_norm(grads, clip_norm)
+    clipped_grads_vars = zip(clipped_grads, variables)
+    return clipped_grads_vars
 
 
 def train(args):
@@ -30,24 +40,30 @@ def train(args):
     if args.log_root:
         if args.config is None:
             raise RuntimeError('No config json specified.')
-        tf.logging.info('using config form {}'.format(args.config))
-        with open(args.config, 'rt') as F:
+        config_json = args.config
+        with open(config_json, 'rt') as F:
             configs = json.load(F)
         hparams = Namespace(**configs)
         logdir_name = config_str.get_config_time_str(hparams, 'wavenet', EXP_TAG)
         logdir = os.path.join(args.log_root, logdir_name)
         os.makedirs(logdir, exist_ok=True)
-        shutil.copy(args.config, logdir)
+        shutil.copy(config_json, logdir)
     else:
         logdir = args.logdir
         config_json = glob.glob(os.path.join(logdir, '*.json'))[0]
-        tf.logging.info('using config form {}'.format(config_json))
         with open(config_json, 'rt') as F:
             configs = json.load(F)
         hparams = Namespace(**configs)
+
+    enhance_log.add_log_file(logdir)
+    if not args.log_root:
+        tf.logging.info('Continue running\n\n')
+    tf.logging.info('using config form {}'.format(config_json))
     tf.logging.info('Saving to {}'.format(logdir))
 
     wn = wavenet.Wavenet(hparams, os.path.abspath(os.path.expanduser(args.train_path)))
+    wn_config_str = enhance_log.instance_attr_to_str(wn)
+    tf.logging.info('\n' + wn_config_str)
 
     def _data_dep_init():
         # slim.learning.train runs init_fn earlier than start_queue_runner
@@ -133,6 +149,8 @@ def train(args):
 
             loss, clone_grads_vars = model_deploy.optimize_clones(
                 clones, optimizer, var_list=tf.trainable_variables())
+            if GRAD_CLIP:
+                clone_grads_vars = grad_clip(clone_grads_vars)
             update_ops.append(
                 optimizer.apply_gradients(clone_grads_vars, global_step=global_step))
             update_ops.append(ema.apply(tf.trainable_variables()))

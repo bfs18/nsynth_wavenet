@@ -26,13 +26,14 @@ class WNHelper(object):
             use_resize_conv, name_patt, act='tanh',
             use_weight_norm=False, init=False):
         act_func = masked.get_upsample_act(act)
-        conv_args = {"x": x,
-                     "num_filters": num_filters,
-                     "filter_length": filter_length,
-                     "stride": stride,
-                     "activation": act_func,
-                     "use_weight_norm": use_weight_norm,
-                     "init": init}
+        conv_args = {
+            "x": x,
+            "num_filters": num_filters,
+            "filter_length": filter_length,
+            "stride": stride,
+            "activation": act_func,
+            "use_weight_norm": use_weight_norm,
+            "init": init}
         if use_resize_conv:
             y = masked.resize_conv1d(
                 **conv_args, name=name_patt.format("resize_conv"))
@@ -105,10 +106,8 @@ class Wavenet(object):
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
         self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
-        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
-        self.use_input_noise = getattr(self.hparams, 'use_input_noise', False)
+        self.use_dropout = getattr(self.hparams, 'use_dropout', True)
         self.use_as_teacher = getattr(self.hparams, 'use_as_teacher', False)
-        assert not (self.dropout_inputs and self.use_input_noise)
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
         self.use_mu_law = self.hparams.use_mu_law
@@ -188,12 +187,12 @@ class Wavenet(object):
         width = self.hparams.width
         skip_width = self.hparams.skip_width
         out_width = self.out_width
-        dropout_inputs = self.dropout_inputs
-        use_input_noise = self.use_input_noise
+        use_dropout = self.use_dropout
         use_as_teacher = self.use_as_teacher
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
         gate_width = 2 * width if self.double_gate_width else width
+        dropout_training = not use_as_teacher
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -212,25 +211,21 @@ class Wavenet(object):
         ###
         # The WaveNet Decoder.
         ###
-        if use_input_noise and not init:
-            x_scaled += tf.random_normal(shape=x_scaled.get_shape(),
-                                         mean=0.0, stddev=0.1)
         l = masked.shift_right(x_scaled)
         l = masked.conv1d(
             l, num_filters=width, filter_length=filter_length, name='conv_start',
             use_weight_norm=use_weight_norm, init=init)
+        if use_dropout:
+            l = tf.layers.dropout(l, rate=0.2, training=dropout_training, name='conv_dropout')
 
         # Set up skip connections.
         s = masked.conv1d(
             l, num_filters=skip_width, filter_length=1, name='skip_start',
             use_weight_norm=use_weight_norm, init=init)
 
-        if dropout_inputs and not init:
-            dropout_training = not use_as_teacher
-            l = tf.layers.dropout(l, rate=0.5, training=dropout_training, name='conv_dropout')
-            s = tf.layers.dropout(s, rate=0.5, training=dropout_training, name='skip_dropout')
-
+        ###
         # Residual blocks with skip connections.
+        ###
         for i in range(num_layers):
             dilation = 2 ** (i % num_stages)
             d = masked.conv1d(
@@ -262,6 +257,10 @@ class Wavenet(object):
             s += masked.conv1d(
                 d, num_filters=skip_width, filter_length=1, name='skip_%d' % (i + 1),
                 use_weight_norm=use_weight_norm, init=init)
+
+            if use_dropout:
+                l = tf.layers.dropout(l, rate=0.2, training=dropout_training,
+                                      name='res_dropout_%d' % (i + 1))
 
         s = tf.nn.relu(s)
         s = masked.conv1d(s, num_filters=skip_width, filter_length=1, name='out1',
@@ -313,7 +312,7 @@ class Fastgen(object):
         self.loss_type = self.hparams.loss_type
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
-        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
+        self.use_dropout = getattr(self.hparams, 'use_dropout', False)
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -378,7 +377,7 @@ class Fastgen(object):
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
         gate_width = 2 * width if self.double_gate_width else width
-        dropout_inputs = self.dropout_inputs
+        use_dropout = self.use_dropout
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
@@ -408,6 +407,8 @@ class Fastgen(object):
             batch_size=batch_size,
             filter_length=filter_length,
             use_weight_norm=use_weight_norm)
+        if use_dropout:
+            l = tf.layers.dropout(l, rate=0.2, training=False, name='conv_dropout')
 
         for init in inits:
             init_ops.append(init)
@@ -417,10 +418,6 @@ class Fastgen(object):
         # Set up skip connections.
         s = masked.linear(l, width, skip_width, name='skip_start',
                           use_weight_norm=use_weight_norm)
-
-        if dropout_inputs:
-            l = tf.layers.dropout(l, rate=0.5, training=False, name='conv_dropout')
-            s = tf.layers.dropout(s, rate=0.5, training=False, name='skip_dropout')
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -459,6 +456,11 @@ class Fastgen(object):
             # skips
             s += masked.linear(d, gate_width // 2, skip_width, name='skip_%d' % (i + 1),
                                use_weight_norm=use_weight_norm)
+
+            # dropout
+            if use_dropout:
+                l = tf.layers.dropout(l, rate=0.2, training=False,
+                                      name='res_dropout_%d' % (i + 1))
 
         s = tf.nn.relu(s)
         s = (masked.linear(s, skip_width, skip_width, name='out1',

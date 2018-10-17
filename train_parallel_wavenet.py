@@ -5,7 +5,7 @@ import shutil
 import os
 from argparse import ArgumentParser, Namespace
 from wavenet import parallel_wavenet, wavenet
-from auxilaries import utils, config_str
+from auxilaries import utils, config_str, enhance_log
 from deployment import model_deploy
 from auxilaries import reader
 from train_wavenet import _init_logging
@@ -43,24 +43,32 @@ def train(args):
     if args.log_root:
         if args.config is None:
             raise RuntimeError('No config json specified.')
-        tf.logging.info('using config form {}'.format(args.config))
-        with open(args.config, 'rt') as F:
+        config_json = args.config
+        with open(config_json, 'rt') as F:
             configs = json.load(F)
         st_hparams = Namespace(**configs)
         logdir_name = config_str.get_config_time_str(st_hparams, 'parallel_wavenet', EXP_TAG)
         logdir = os.path.join(args.log_root, logdir_name)
         os.makedirs(logdir, exist_ok=True)
-        shutil.copy(args.config, logdir)
+        shutil.copy(config_json, logdir)
     else:
         logdir = args.logdir
         config_json = glob.glob(os.path.join(logdir, '*.json'))[0]
-        tf.logging.info('using config form {}'.format(config_json))
         with open(config_json, 'rt') as F:
             configs = json.load(F)
         st_hparams = Namespace(**configs)
+
+    enhance_log.add_log_file(logdir)
+    if not args.log_root:
+        tf.logging.info('Continue running\n\n')
+    tf.logging.info('using config form {}'.format(config_json))
     tf.logging.info('Saving to {}'.format(logdir))
 
     pwn = parallel_wavenet.ParallelWavenet(st_hparams, teacher, args.train_path)
+    pwn_config_str = enhance_log.instance_attr_to_str(pwn)
+    teacher_config_str = enhance_log.instance_attr_to_str(teacher)
+    tf.logging.info('\n' + pwn_config_str)
+    tf.logging.info('\nteacher form {}\n'.format(teacher_dir) + teacher_config_str)
 
     def _data_dep_init():
         inputs_val = reader.get_init_batch(
