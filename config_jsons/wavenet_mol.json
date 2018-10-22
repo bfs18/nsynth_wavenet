@@ -1,7 +1,7 @@
 {
   "lr_schedule": [[0, 1e-4], [90000, 6e-5], [120000, 4e-5],
     [150000, 2e-5], [180000, 6e-6], [210000, 2e-6]],
-  "num_iters": 200000,
+  "num_iters": 400000,
   "wave_length": 7680,
   "num_stages": 10,
   "num_layers": 30,
@@ -16,6 +16,6 @@
   "use_weight_norm": false,
   "double_gate_width": false,
   "use_resize_conv": false,
-  "upsample_act": "tanh",
-  "use_dropout": true
+  "upsample_act": "leaky_relu",
+  "dropout_inputs": true
 }

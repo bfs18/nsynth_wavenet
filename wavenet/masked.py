@@ -124,7 +124,7 @@ def batch_to_time(x, block_size):
 
 def l2_norm(tensor, axis, keep_dims=True):
     s = tf.reduce_sum(tf.pow(tensor, 2.0),
-                      axis=axis, keep_dims=keep_dims)
+                      axis=axis, keepdims=keep_dims)
     return tf.sqrt(s)
 
 

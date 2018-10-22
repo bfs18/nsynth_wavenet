@@ -94,10 +94,12 @@ def get_config_srt(hparams, model, tag=''):
         else:
             cstr += '-SEP_DC'
     else:
-        if getattr(hparams, 'dropout_inputs', False):
-            cstr += '-DO'
-        else:
+        if not getattr(hparams, 'dropout_inputs', False) and not getattr(hparams, 'dropout_all', False):
             cstr += '-n_DO'
+        elif getattr(hparams, 'dropout_inputs', False):
+            cstr += '-DIN'
+        else:
+            cstr += '-DA'
 
     if loss_type:
         cstr += '-{}'.format(loss_type)

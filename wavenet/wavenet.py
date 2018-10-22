@@ -106,8 +106,10 @@ class Wavenet(object):
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
         self.use_resize_conv = getattr(self.hparams, 'use_resize_conv', False)
         self.upsample_act = getattr(self.hparams, 'upsample_act', 'tanh')
-        self.use_dropout = getattr(self.hparams, 'use_dropout', True)
         self.use_as_teacher = getattr(self.hparams, 'use_as_teacher', False)
+        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
+        self.dropout_all = getattr(self.hparams, 'dropout_all', False)
+        assert not(self.dropout_inputs and self.dropout_all)
         # only take the variables used both by
         # feed_forward and calculate_loss as class property.
         self.use_mu_law = self.hparams.use_mu_law
@@ -125,6 +127,12 @@ class Wavenet(object):
             self.out_width = 2
         else:
             raise ValueError('[{}] loss is not supported')
+
+    @property
+    def dropout_rate(self):
+        # take it as property because it is not assessed if use_dropout = False.
+        return getattr(self.hparams, 'dropout_rate',
+                       0.5 if self.dropout_inputs else 0.05)
 
     def get_batch(self, batch_size):
         train_path = self.train_path
@@ -187,12 +195,15 @@ class Wavenet(object):
         width = self.hparams.width
         skip_width = self.hparams.skip_width
         out_width = self.out_width
-        use_dropout = self.use_dropout
+        dropout_inputs = self.dropout_inputs
+        dropout_all = self.dropout_all
         use_as_teacher = self.use_as_teacher
         # in parallel wavenet paper, gate width is the same with residual width
         # not double of that.
         gate_width = 2 * width if self.double_gate_width else width
-        dropout_training = not use_as_teacher
+        if dropout_inputs or dropout_all:
+            dropout_training = not use_as_teacher
+            dropout_rate = self.dropout_rate
 
         ###
         # The Transpose Convolution Stack for mel feature.
@@ -215,13 +226,17 @@ class Wavenet(object):
         l = masked.conv1d(
             l, num_filters=width, filter_length=filter_length, name='conv_start',
             use_weight_norm=use_weight_norm, init=init)
-        if use_dropout:
-            l = tf.layers.dropout(l, rate=0.2, training=dropout_training, name='conv_dropout')
+        if dropout_all:
+            l = tf.layers.dropout(l, rate=dropout_rate, training=dropout_training, name='conv_dropout')
 
         # Set up skip connections.
         s = masked.conv1d(
             l, num_filters=skip_width, filter_length=1, name='skip_start',
             use_weight_norm=use_weight_norm, init=init)
+
+        if dropout_inputs:
+            l = tf.layers.dropout(l, rate=dropout_rate, training=dropout_training, name='conv_dropout')
+            s = tf.layers.dropout(s, rate=dropout_rate, training=dropout_training, name='skip_dropout')
 
         ###
         # Residual blocks with skip connections.
@@ -258,8 +273,8 @@ class Wavenet(object):
                 d, num_filters=skip_width, filter_length=1, name='skip_%d' % (i + 1),
                 use_weight_norm=use_weight_norm, init=init)
 
-            if use_dropout:
-                l = tf.layers.dropout(l, rate=0.2, training=dropout_training,
+            if dropout_all:
+                l = tf.layers.dropout(l, rate=dropout_rate, training=dropout_training,
                                       name='res_dropout_%d' % (i + 1))
 
         s = tf.nn.relu(s)
@@ -312,7 +327,9 @@ class Fastgen(object):
         self.loss_type = self.hparams.loss_type
         self.use_weight_norm = getattr(self.hparams, 'use_weight_norm', False)
         self.double_gate_width = getattr(self.hparams, 'double_gate_width', True)
-        self.use_dropout = getattr(self.hparams, 'use_dropout', False)
+        self.dropout_inputs = getattr(self.hparams, 'dropout_inputs', False)
+        self.dropout_all = getattr(self.hparams, 'dropout_all', False)
+        assert not(self.dropout_inputs and self.dropout_all)
         if self.use_mu_law:
             self.quant_chann = 2 ** 8
         else:
@@ -326,6 +343,11 @@ class Fastgen(object):
             self.out_width = 2
         else:
             raise ValueError('[{}] loss is not supported')
+
+    @property
+    def dropout_rate(self):
+        return getattr(self.hparams, 'dropout_rate',
+                       0.5 if self.dropout_inputs else 0.05)
 
     # used for data visualization
     def cond_vars(self, inputs):
@@ -377,7 +399,10 @@ class Fastgen(object):
         deconv_width = self.hparams.deconv_width
         loss_type = self.loss_type
         gate_width = 2 * width if self.double_gate_width else width
-        use_dropout = self.use_dropout
+        dropout_inputs = self.dropout_inputs
+        dropout_all = self.dropout_all
+        if dropout_inputs or dropout_all:
+            dropout_rate = self.dropout_rate
 
         # mel information is trans_conv_stack output, different from wavenet.feed_forward
         mel_en = inputs['encoding']  # [batch_size, deconv_width]
@@ -407,8 +432,8 @@ class Fastgen(object):
             batch_size=batch_size,
             filter_length=filter_length,
             use_weight_norm=use_weight_norm)
-        if use_dropout:
-            l = tf.layers.dropout(l, rate=0.2, training=False, name='conv_dropout')
+        if dropout_all:
+            l = tf.layers.dropout(l, rate=dropout_rate, training=False, name='conv_dropout')
 
         for init in inits:
             init_ops.append(init)
@@ -418,6 +443,10 @@ class Fastgen(object):
         # Set up skip connections.
         s = masked.linear(l, width, skip_width, name='skip_start',
                           use_weight_norm=use_weight_norm)
+
+        if dropout_inputs:
+            l = tf.layers.dropout(l, rate=dropout_rate, training=False, name='conv_dropout')
+            s = tf.layers.dropout(s, rate=dropout_rate, training=False, name='skip_dropout')
 
         # Residual blocks with skip connections.
         for i in range(num_layers):
@@ -458,8 +487,8 @@ class Fastgen(object):
                                use_weight_norm=use_weight_norm)
 
             # dropout
-            if use_dropout:
-                l = tf.layers.dropout(l, rate=0.2, training=False,
+            if dropout_all:
+                l = tf.layers.dropout(l, rate=dropout_rate, training=False,
                                       name='res_dropout_%d' % (i + 1))
 
         s = tf.nn.relu(s)
