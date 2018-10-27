@@ -6,6 +6,8 @@ To make the code and configuration as simple as possible, most of the extensible
 
 How to use the code:  
 
+Note you need python 3.5+ and corresponding tensorflow (install from [here](https://www.tensorflow.org/install/pip) using url)
+
 Suppose a directory named `WAVE_DIR` contains all the wave files that are used to train a wavenet model.
 1.  Downsample the wave files if the sampling rate is not 16k Hz
  (only 16k Hz wave files are supported for the time being).   
