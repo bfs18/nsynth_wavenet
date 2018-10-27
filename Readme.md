@@ -31,7 +31,7 @@ The arguments are quite self-evident.
 
 4. Generate waves form a trained wavenet. Suppose a trained wavenet is saved in WN_LOGDIR.
     ```
-    python3 eavl_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data \
+    python3 eval_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data \
         --save_path tests/pred_data --gpu_id 0
     ```
 5. Train a parallel wavenet.
@@ -43,7 +43,7 @@ The arguments are quite self-evident.
 6.  Generate waves form a trained parallel wavenet. 
     Suppose a trained parallel wavenet is saved in PWN_LOGDIR.
     ```
-    python3 eavl_parallel_wavenet.py --ckpt_dir PWN_LOGDIR --source_path tests/test_data \
+    python3 eval_parallel_wavenet.py --ckpt_dir PWN_LOGDIR --source_path tests/test_data \
         --save_path tests/pred_data --gpu_id 0
     ```
 7. If multiple experiments is run on multiple servers, you may want to gather all the experiment
