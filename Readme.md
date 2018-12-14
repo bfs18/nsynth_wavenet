@@ -134,3 +134,10 @@ And it is generating very noisy but to some extent meaningful waves.
 ![x-x_abs1](tests/figures/x-x_abs.png)      
 ![x-x_abs2](tests/figures/x-x_abs2.png)      
 ![x-x_abs-dist](tests/figures/x_x_abs-stat.png)   
+
+### Support:
+
+If you want the good work to continue please support us on
+
+* [PAYPAL](https://www.paypal.me/ishandutta2007)
+* [BITCOIN ADDRESS: 3LZazKXG18Hxa3LLNAeKYZNtLzCxpv1LyD](https://www.coinbase.com/join/5a8e4a045b02c403bc3a9c0c)
