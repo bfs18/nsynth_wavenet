@@ -6,6 +6,8 @@ To make the code and configuration as simple as possible, most of the extensible
 
 How to use the code:  
 
+Note you need python 3.5+ and corresponding tensorflow (install from [here](https://www.tensorflow.org/install/pip) using url)
+
 Suppose a directory named `WAVE_DIR` contains all the wave files that are used to train a wavenet model.
 1.  Downsample the wave files if the sampling rate is not 16k Hz
  (only 16k Hz wave files are supported for the time being).   
@@ -31,7 +33,7 @@ The arguments are quite self-evident.
 
 4. Generate waves form a trained wavenet. Suppose a trained wavenet is saved in WN_LOGDIR.
     ```
-    python3 eavl_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data \
+    python3 eval_wavenet.py --ckpt_dir WN_LOGDIR --source_path tests/test_data \
         --save_path tests/pred_data --gpu_id 0
     ```
 5. Train a parallel wavenet.
@@ -43,7 +45,7 @@ The arguments are quite self-evident.
 6.  Generate waves form a trained parallel wavenet. 
     Suppose a trained parallel wavenet is saved in PWN_LOGDIR.
     ```
-    python3 eavl_parallel_wavenet.py --ckpt_dir PWN_LOGDIR --source_path tests/test_data \
+    python3 eval_parallel_wavenet.py --ckpt_dir PWN_LOGDIR --source_path tests/test_data \
         --save_path tests/pred_data --gpu_id 0
     ```
 7. If multiple experiments is run on multiple servers, you may want to gather all the experiment
@@ -132,3 +134,10 @@ And it is generating very noisy but to some extent meaningful waves.
 ![x-x_abs1](tests/figures/x-x_abs.png)      
 ![x-x_abs2](tests/figures/x-x_abs2.png)      
 ![x-x_abs-dist](tests/figures/x_x_abs-stat.png)   
+
+### Support:
+
+If you want the good work to continue please support us on
+
+* [PAYPAL](https://www.paypal.me/ishandutta2007)
+* [BITCOIN ADDRESS: 3LZazKXG18Hxa3LLNAeKYZNtLzCxpv1LyD](https://www.coinbase.com/join/5a8e4a045b02c403bc3a9c0c)
